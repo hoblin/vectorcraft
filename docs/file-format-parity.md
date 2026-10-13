@@ -10,7 +10,7 @@ forbids reading the install. Part of [target-app-parity.md](target-app-parity.md
 **Fidelity** is estimated unless a test is named. Test sources: unit and property tests per crate
 (`crates/svg/tests`, `crates/pdf/tests`, `crates/format/tests/prop_format.rs`), import fuzzing
 (`crates/engine/tests/import_fuzz.rs`), the Affinity corpus (`cargo xtask corpus --affinity`, 51 pinned public
-files, CI job `affinity-corpus.yml`). There is **no real-world Illustrator corpus**: test inputs are written
+files, upstream's CI job `affinity-corpus.yml`). There is **no real-world Illustrator corpus**: test inputs are written
 from the public specifications, and users' own `.ai` files are used locally only.
 
 ## Summary

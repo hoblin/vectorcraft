@@ -7,14 +7,14 @@
 `hoblin/vectorcraft` is maintained for the Möttönen Creative Studio image, which runs
 `vectorcraft-cli` on Linux x86_64. Its release is `.github/workflows/release.yml`, which replaces
 every upstream workflow: pushing a tag `v<upstream version>-bondata.<n>` (for example
-`v0.10.0-bondata.1`) builds `vectorcraft-<version>-linux-x86_64.tar.gz` on `ubuntu-22.04` with
+`v0.10.0-bondata.2`; upstream's own tags, synced without the suffix, release nothing) builds `vectorcraft-<version>-linux-x86_64.tar.gz` on `ubuntu-22.04` with
 `packaging/linux/package.sh --formats tar` and craft-fonts at the pinned commit, then publishes it
 with `SHA256SUMS.txt` as the GitHub release `VectorCraft v<version>` of this repository. The
 archive has the same layout as upstream's Linux tarball (`bin/vectorcraft`, `bin/vectorcraft-cli`,
 `share/`), so a consumer downloads and unpacks it the way it did the official one:
 
 ```sh
-v=0.10.0-bondata.1
+v=0.10.0-bondata.2
 curl -fsSLO "https://github.com/hoblin/vectorcraft/releases/download/v$v/vectorcraft-$v-linux-x86_64.tar.gz"
 curl -fsSLO "https://github.com/hoblin/vectorcraft/releases/download/v$v/SHA256SUMS.txt"
 sha256sum -c --ignore-missing --strict SHA256SUMS.txt
@@ -26,8 +26,8 @@ The job sets the workspace version from the tag (`cargo xtask version set`) befo
 macOS, Windows or other targets. Re-running the workflow on a released tag replaces its assets.
 Tags are never moved: a fix gets the next `-bondata.<n>`.
 
-The rest of this page describes upstream's pipeline, which the packaging scripts under
-`packaging/` still implement.
+The rest of this page describes upstream's pipeline. Its workflows no longer exist here; the
+packaging scripts under `packaging/` that they called still do.
 
 ## Upstream
 
