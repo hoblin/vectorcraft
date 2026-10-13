@@ -83,27 +83,35 @@ fn is_key(s: &str) -> bool {
     chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_') && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// The keys a params description names, or what in it doesn't read as one.
-pub fn doc_keys(doc: &str) -> std::result::Result<ParamKeys<'_>, String> {
-    let mut out = ParamKeys::default();
+/// One entry of a params object: the keys it names (each with whether it is optional), or what a
+/// `…` entry stands for.
+enum Entry<'a> {
+    Keys(Vec<(&'a str, bool)>),
+    More(&'a str),
+}
+
+/// The entries of the params object(s) `doc` starts with (`{…} or {…}`, `{…} | {…}`: the objects
+/// the command takes instead of one another), or what in it doesn't read as one.
+fn entries(doc: &str) -> std::result::Result<Vec<Entry<'_>>, String> {
     let (mut body, mut rest) = object_body(doc)?;
-    let mut entries = split_top(body, ',');
-    // `{…} or {…}`, `{…} | {…}`: the objects the command takes instead.
+    let mut raw = split_top(body, ',');
     while let Some(next) = rest.trim_start().strip_prefix("or ").or_else(|| rest.trim_start().strip_prefix("| ")).filter(|r| r.starts_with('{')) {
         (body, rest) = object_body(next)?;
-        entries.extend(split_top(body, ','));
+        raw.extend(split_top(body, ','));
     }
-    for entry in entries.into_iter().map(str::trim).filter(|e| !e.is_empty()) {
+    let mut out = vec![];
+    for entry in raw.into_iter().map(str::trim).filter(|e| !e.is_empty()) {
         if let Some(more) = entry.strip_prefix('…') {
-            out.more.push(more.trim());
+            out.push(Entry::More(more.trim()));
             continue;
         }
         // `a?|b?: note` names two keys, and so does `a?: note | b?: note`; in `a?: x|y` the `y`
         // is a value.
-        let mut noted = false;
+        let (mut keys, mut noted) = (vec![], false);
         for alternative in split_top(entry, '|') {
             let head = alternative.split([':', '=', '(']).next().unwrap_or_default();
             let rest = alternative.get(head.len()..).unwrap_or_default();
+            let optional = head.trim_end().ends_with('?');
             let name = head.trim().trim_end_matches('?').trim_end();
             if !noted {
                 if !is_key(name) {
@@ -111,14 +119,73 @@ pub fn doc_keys(doc: &str) -> std::result::Result<ParamKeys<'_>, String> {
                     let why = format!("`{start}` doesn't start with a parameter name");
                     return Err(why);
                 }
-                out.keys.push(name);
+                keys.push((name, optional));
                 noted = !rest.is_empty();
-            } else if is_key(name) && (head.trim_end().ends_with('?') || rest.starts_with(':')) {
-                out.keys.push(name);
+            } else if is_key(name) && (optional || rest.starts_with(':')) {
+                keys.push((name, optional));
             }
+        }
+        out.push(Entry::Keys(keys));
+    }
+    Ok(out)
+}
+
+/// The keys a params description names, or what in it doesn't read as one.
+pub fn doc_keys(doc: &str) -> std::result::Result<ParamKeys<'_>, String> {
+    let mut out = ParamKeys::default();
+    for entry in entries(doc)? {
+        match entry {
+            Entry::Keys(keys) => out.keys.extend(keys.into_iter().map(|(name, _)| name)),
+            Entry::More(more) => out.more.push(more),
         }
     }
     Ok(out)
+}
+
+/// `doc` split at the `→` outside brackets that starts what the command answers: the parameters
+/// and, when it says, the answer. An arrow in prose (`View → Show Print Tiling`) doesn't count
+/// while a later one leads to an object or a list.
+pub fn parts(doc: &str) -> (&str, Option<&str>) {
+    let (mut depth, mut quote, mut arrows) = (0usize, None, vec![]);
+    for (i, c) in doc.char_indices() {
+        match (quote, c) {
+            (Some(q), _) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '`') => quote = Some(c),
+            (None, '{' | '[' | '(') => depth += 1,
+            (None, '}' | ']' | ')') => depth = depth.saturating_sub(1),
+            (None, '→') if depth == 0 => arrows.push(i),
+            _ => {}
+        }
+    }
+    let answer = |at: usize| doc.get(at + '→'.len_utf8()..).unwrap_or_default().trim();
+    let at = arrows.iter().copied().find(|at| answer(*at).starts_with(['{', '['])).or(arrows.first().copied());
+    match at {
+        Some(at) => (doc.get(..at).unwrap_or_default().trim_end(), Some(answer(at))),
+        None => (doc, None),
+    }
+}
+
+/// Does the description `doc` name `key` as an optional parameter (`key?`)?
+pub fn optional_key(doc: &str, key: &str) -> bool {
+    entries(doc).unwrap_or_default().iter().any(|e| matches!(e, Entry::Keys(keys) if keys.iter().any(|(name, optional)| *name == key && *optional)))
+}
+
+/// The params object of `doc` with only its keys, `?` marking the optional ones: `{x, y, width,
+/// height, radius?, rotation?}`, `{}` for a command that takes none. What an error names as what
+/// the command takes (its full description can run to pages).
+pub fn outline(doc: &str) -> String {
+    let entries = entries(doc).unwrap_or_default();
+    let shown: Vec<String> = entries
+        .iter()
+        .map(|e| match e {
+            Entry::Keys(keys) => {
+                keys.iter().map(|(name, optional)| format!("{name}{}", if *optional { "?" } else { "" })).collect::<Vec<_>>().join("|")
+            }
+            Entry::More(more) => format!("…{more}"),
+        })
+        .collect();
+    format!("{{{}}}", shown.join(", "))
 }
 
 /// The commands whose keys a `…` entry stands for: those it names after `as` or `of` (`settings as
@@ -154,37 +221,12 @@ fn accepted(doc: &'static str, depth: usize) -> Option<Vec<&'static str>> {
 
 /// Does the description `doc` name `key` as a parameter (its own keys, and those of the commands
 /// its `…` entries name)?
-pub(crate) fn takes_key(doc: &'static str, key: &str) -> bool {
+pub fn takes_key(doc: &'static str, key: &str) -> bool {
     doc_keys(doc).is_ok_and(|parsed| parsed.keys.contains(&key)) || accepted(doc, 0).is_some_and(|keys| keys.contains(&key))
 }
 
-/// The edits (insert, delete, replace, swap of neighbours) that turn `a` into `b`, ignoring case.
-fn distance(a: &str, b: &str) -> usize {
-    let (a, b): (Vec<char>, Vec<char>) = (a.chars().map(|c| c.to_ascii_lowercase()).collect(), b.chars().map(|c| c.to_ascii_lowercase()).collect());
-    let (mut before, mut prev): (Vec<usize>, Vec<usize>) = (Vec::new(), (0..=b.len()).collect());
-    for (i, ca) in a.iter().enumerate() {
-        let mut row = vec![i + 1];
-        for (j, cb) in b.iter().enumerate() {
-            let at = |r: &[usize], k: usize| r.get(k).copied().unwrap_or(usize::MAX / 2);
-            let mut d = (at(&prev, j) + usize::from(ca != cb)).min(at(&prev, j + 1) + 1).min(at(&row, j) + 1);
-            if i > 0 && j > 0 && a.get(i - 1) == Some(cb) && b.get(j - 1) == Some(ca) {
-                d = d.min(at(&before, j - 1) + 1);
-            }
-            row.push(d);
-        }
-        before = std::mem::replace(&mut prev, row);
-    }
-    prev.last().copied().unwrap_or(0)
-}
-
-/// The key of `keys` a misspelt `key` most likely meant: the nearest one, when it is near.
-fn nearest<'a>(key: &str, keys: &[&'a str]) -> Option<&'a str> {
-    let near = keys.iter().map(|k| (distance(key, k), *k)).min()?;
-    (near.0 <= (key.chars().count() / 3).max(1)).then_some(near.1)
-}
-
 /// `params` has only keys the description `doc` of command `id` names, or the parameter error
-/// naming the first one it doesn't, with the nearest accepted key or the accepted ones.
+/// naming the first one it doesn't and what the command takes.
 pub fn check_keys(id: &str, doc: &'static str, params: &Value) -> Result<()> {
     let Value::Object(given) = params else { return Ok(()) };
     if given.is_empty() {
@@ -192,22 +234,23 @@ pub fn check_keys(id: &str, doc: &'static str, params: &Value) -> Result<()> {
     }
     let Some(keys) = accepted(doc, 0) else { return Ok(()) };
     match given.keys().find(|k| !keys.contains(&k.as_str())) {
-        Some(key) => Err(unknown(id, key, &keys)),
+        Some(key) => Err(unknown(id, key, takes(id, &outline(doc)))),
         None => Ok(()),
     }
 }
 
-/// The parameter error of command `id` for `key`, which isn't one of `keys`: with the nearest of
-/// them, or all of them.
-fn unknown(id: &str, key: &str, keys: &[&str]) -> crate::EngineError {
-    bad(
-        id,
-        match nearest(key, keys) {
-            Some(near) => format!("unknown parameter `{key}`; did you mean `{near}`?"),
-            None if keys.is_empty() => format!("unknown parameter `{key}`; the command takes no parameters"),
-            None => format!("unknown parameter `{key}`; the command takes: {}", keys.join(", ")),
-        },
-    )
+/// `` `{id}` takes {outline} ``, or that it takes none. The tail of every parameter error, so the
+/// agent that sent them sees the keys without another call.
+pub fn takes(id: &str, outline: &str) -> String {
+    match outline {
+        "{}" => format!("`{id}` takes no parameters"),
+        outline => format!("`{id}` takes {outline}"),
+    }
+}
+
+/// The parameter error of command `id` for `key`, with `takes`, what is taken instead.
+fn unknown(id: &str, key: &str, takes: String) -> crate::EngineError {
+    bad(id, format!("unknown parameter `{key}`; {takes}"))
 }
 
 /// `params` of built-in effect `effect`, as command `id` was given them (#1592): only keys the
@@ -230,7 +273,7 @@ pub fn check_effect_params(id: &str, effect: &str, params: &Value) -> Result<()>
     }
     for (key, v) in given {
         if !keys.contains(&key.as_str()) {
-            return Err(unknown(id, key, &keys));
+            return Err(unknown(id, key, takes(effect, &format!("{{{}}}", keys.join(", ")))));
         }
         match defaults.and_then(|d| d.get(key)) {
             Some(Value::Number(_)) if !v.is_number() => return Err(bad(id, format!("`{key}` must be a number"))),

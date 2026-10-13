@@ -1,14 +1,5 @@
-//! `vectorcraft-cli`: VectorCraft from the command line.
-//!
-//! ```text
-//! vectorcraft-cli mcp [--connect 127.0.0.1:7979 | --headless] [--automation-read-root DIR] [--automation-write-root DIR]
-//! vectorcraft-cli run [--in FILE] [--cmd id [--params '{json}']]... [--export out.svg]... [--scale 2]
-//! vectorcraft-cli commands
-//! vectorcraft-cli convert IN OUT [--scale 2] [--artboard 0 | --range 1-3,5] [--outline-text] [--decimals N] [--replace-lossy] [--editing-data]
-//! vectorcraft-cli info FILE
-//! vectorcraft-cli bench FILE [--size 2880x1800] [--iters 5]
-//! vectorcraft-cli perf [--paths 50000] [--deep]
-//! ```
+//! `vectorcraft-cli`: VectorCraft from the command line. The subcommands and their flags are
+//! documented where the agent reads them: the help pages in [`help`].
 // Denied, not forbidden: the font listers shared with the desktop app allow it for their
 // DirectWrite (Windows) and CoreText (macOS) calls, and nothing else may.
 #![deny(unsafe_code)]
@@ -37,6 +28,7 @@ macro_rules! out {
     }};
 }
 
+mod help;
 /// The desktop app's CoreText font lister, shared: exports and MCP find the same fonts.
 #[cfg(target_os = "macos")]
 #[path = "../../vectorcraft/src/mac_fonts.rs"]
@@ -64,59 +56,6 @@ fn stdout_failed(e: std::io::Error) -> ! {
     std::process::exit(1);
 }
 
-const USAGE: &str = "\
-vectorcraft-cli — VectorCraft automation
-
-USAGE:
-  vectorcraft-cli mcp [--connect ADDR | --headless] [--automation-read-root DIR] [--automation-write-root DIR]
-      Run the MCP server on stdio. Default: connect to a running app at 127.0.0.1:7979
-      (vectorcraft --control 7979), falling back to a headless in-process session.
-      --automation-read-root / --automation-write-root confine the files the agent's commands read
-      (open, place, relink, library loads…) and write (save, export, package, library saves…) to
-      DIR, links followed; a root left out grants none of its access. They imply --headless: a
-      running app enforces its own (vectorcraft --control PORT --automation-read-root DIR …).
-
-  vectorcraft-cli run [--in FILE] [--cmd ID [--params JSON]]... [--export FILE]... [--scale N]
-      Headless batch: open FILE (any readable format) or start a new document, run commands in
-      order, export each FILE in the format its extension picks (see Writable formats). Prints one
-      JSON result per step.
-
-  vectorcraft-cli commands
-      Print the command catalogue as JSON.
-
-  vectorcraft-cli convert IN OUT [--scale N] [--artboard I | --range R] [--outline-text] [--decimals N] [--replace-lossy] [--editing-data]
-      Open IN (any readable format) and export OUT in the format its extension picks (see Writable
-      formats). --artboard is 0-based, --range 1-based (\"1-3,5\"); a PDF gets every artboard
-      unless one of them is given, EPS the bounds of the art, the other formats the first artboard.
-      Live effects are kept, and hidden layers and objects (written hidden in SVG and PSD), with
-      SVG's data-* attributes; --outline-text writes SVG text as paths, --decimals sets SVG's coordinate
-      precision (1–7, default 3). OUT may not be IN when reading
-      IN left things out (hidden text, art or layers it could not read; the notes say which) unless
-      --replace-lossy is given. --editing-data opens a .ai from its editing copy even where that
-      draws differently from its PDF part (which can be older), as long as it can be read.
-
-  vectorcraft-cli info FILE
-      Print a JSON summary: the import warnings (what didn't come in as it was, such as an EPS
-      read from its preview and why), title, colour mode, units, artboards, object counts by
-      kind, fonts.
-
-  vectorcraft-cli bench FILE [--size WxH] [--iters N]
-      Render FILE (any readable format) fitted to WxH (default 2880x1800) and print ms per frame
-      (warm), multithreaded and single-threaded.
-
-  vectorcraft-cli perf [--paths N] [--deep]
-      Check the performance budgets (render, pan, hit test, save/load, SVG, Pathfinder, handle
-      and segment drags) on a synthetic N-path document (default 50000). Exits non-zero if a
-      budget is exceeded, unless the report says the machine is busy. --deep also times work with
-      no budget yet and prints memory use (the working set on Windows).
-";
-
-/// The usage text plus the formats `document.open` reads and `document.export` writes.
-fn usage() -> String {
-    use vectorcraft_engine::cmd::fileio::{OPEN_EXTS, export_extensions};
-    format!("{USAGE}\nReadable formats: .{}\nWritable formats: .{}\n", OPEN_EXTS.join(", ."), export_extensions().join(", ."))
-}
-
 fn main() -> ExitCode {
     // Before any font lookup: the fonts font services load (#579).
     #[cfg(all(windows, not(target_vendor = "win7")))]
@@ -125,23 +64,26 @@ fn main() -> ExitCode {
     mac_fonts::install();
     prefs_dir::install_fonts();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let r = match args.first().map(String::as_str) {
+    let first = args.first().map(String::as_str);
+    // `SUB --help` explains SUB and does nothing else, whatever SUB would make of `--help`.
+    let wants_help = args.get(1).is_some_and(|a| matches!(a.as_str(), "--help" | "-h"));
+    let r = match first {
+        Some("help") => match args.get(1).map(String::as_str) {
+            None => show(help::overview()),
+            Some(sub) => help::page(sub).map_or_else(|| Err(unknown_subcommand(sub)), show),
+        },
+        Some(sub) if wants_help => help::page(sub).map_or_else(|| Err(unknown_subcommand(sub)), show),
         Some("mcp") => mcp(&args[1..]),
         Some("run") => run(&args[1..]),
-        Some("commands") => commands(),
+        Some("commands") => commands(args.get(1).map(String::as_str)),
+        Some("describe") => describe(&args[1..]),
         Some("convert") => convert(&args[1..]),
         Some("info") => info(&args[1..]),
         Some("bench") => bench(&args[1..]),
         Some("perf") => perf::run(&args[1..]),
-        Some("-h" | "--help" | "help") | None => {
-            out!("{}", usage());
-            Ok(())
-        }
-        Some("-V" | "--version") => {
-            outln!("vectorcraft-cli {}", env!("CARGO_PKG_VERSION"));
-            Ok(())
-        }
-        Some(other) => Err(format!("unknown subcommand `{other}`\n\n{}", usage())),
+        Some("-h" | "--help") | None => show(help::overview()),
+        Some("-V" | "--version") => show(format!("vectorcraft-cli {}\n", env!("CARGO_PKG_VERSION"))),
+        Some(other) => Err(unknown_subcommand(other)),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,
@@ -150,6 +92,15 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn show(page: String) -> Result<(), String> {
+    out!("{page}");
+    Ok(())
+}
+
+fn unknown_subcommand(name: &str) -> String {
+    format!("`{name}` is not a subcommand.\n\n{}", help::overview())
 }
 
 fn mcp(args: &[String]) -> Result<(), String> {
@@ -173,7 +124,11 @@ fn mcp(args: &[String]) -> Result<(), String> {
                     return Err(format!("{flag} is given twice: it takes one folder"));
                 }
             }
-            other => return Err(format!("unknown mcp option `{other}`")),
+            other => {
+                return Err(format!(
+                    "mcp was given `{other}`, which it doesn't take. mcp takes --connect ADDR or --headless, --automation-read-root DIR and --automation-write-root DIR"
+                ));
+            }
         }
     }
     if headless && connect.is_some() {
@@ -210,11 +165,136 @@ fn mcp(args: &[String]) -> Result<(), String> {
     Server::new(backend).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
 }
 
-fn commands() -> Result<(), String> {
+/// One line per command, `id — label: params`, sorted by id and grouped by its first segment;
+/// `filter` keeps the commands whose id or label contains it, ignoring case.
+fn commands(filter: Option<&str>) -> Result<(), String> {
     let mut h = Headless::new();
     let v = h.call("engine.commands", json!({}))?;
-    outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+    let lowered = filter.map(str::to_ascii_lowercase);
+    let mut lines: Vec<(String, String)> = v
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            let id = c["id"].as_str()?;
+            let label = c["label"].as_str().unwrap_or_default();
+            let keep = lowered.as_ref().is_none_or(|f| id.to_ascii_lowercase().contains(f) || label.to_ascii_lowercase().contains(f));
+            keep.then(|| (id.to_string(), command_line(id, label, c["params"].as_str().unwrap_or_default())))
+        })
+        .collect();
+    lines.sort();
+    let mut area = "";
+    for (id, line) in &lines {
+        let prefix = id.split('.').next().unwrap_or_default();
+        if !area.is_empty() && prefix != area {
+            outln!();
+        }
+        area = prefix;
+        outln!("{line}");
+    }
+    if lines.is_empty()
+        && let Some(f) = filter
+    {
+        return Err(format!("no command's id or name contains `{}`; `vectorcraft-cli commands` lists them all", shown(f)));
+    }
     Ok(())
+}
+
+/// `format.size — Font Size: {size: pt}`, the params as their key outline plus what the command
+/// answers (its full description is `describe`'s).
+fn command_line(id: &str, label: &str, doc: &str) -> String {
+    use vectorcraft_engine::cmd::params::{outline, parts};
+    let (_, answer) = parts(doc);
+    let mut line = format!("{id} — {label}");
+    match outline(doc).as_str() {
+        "{}" => {}
+        keys => line.push_str(&format!(": {keys}")),
+    }
+    if let Some(answer) = answer {
+        let short: String = answer.split([';']).next().unwrap_or_default().chars().take(80).collect();
+        line.push_str(&format!(" → {}{}", short.trim(), if short.len() < answer.len() { "…" } else { "" }));
+    }
+    line
+}
+
+/// One command spelled out: its name and menu, its parameters in full, what it answers, what it
+/// acts on, and the `run` call.
+fn describe(args: &[String]) -> Result<(), String> {
+    use vectorcraft_engine::cmd::params::{outline, parts};
+    let [id] = args else {
+        return Err(match args {
+            [] => "describe takes one command id, e.g. `vectorcraft-cli describe shape.rectangle`; `vectorcraft-cli commands` lists them".to_string(),
+            more => format!(
+                "describe takes one command id; it was given {}: {}",
+                more.len(),
+                more.iter().map(|a| shown(a)).collect::<Vec<_>>().join(", ")
+            ),
+        });
+    };
+    let (label, doc) = vectorcraft_mcp::command_doc(id)
+        .ok_or_else(|| format!("{}. `vectorcraft-cli commands` lists them.", vectorcraft_engine::unknown_command(id)))?;
+    let menu = vectorcraft_engine::find_command(id).map(|c| c.menu).filter(|m| !m.is_empty());
+    let (params, answer) = parts(doc);
+    let (params, note) = match params.rsplit_once('}') {
+        Some((head, tail)) if !tail.trim().is_empty() => (format!("{head}}}"), Some(tail.trim())),
+        _ => (params.to_string(), None),
+    };
+    outln!("{id} — {label}{}", menu.map(|m| format!(", in the {} menu", m.join(" › "))).unwrap_or_default());
+    outln!();
+    match params.as_str() {
+        "{}" => outln!("Takes no parameters."),
+        p => outln!("Parameters: {p}"),
+    }
+    if let Some(note) = note {
+        outln!("{}", note.trim_start_matches([':', '=', ' ']));
+    }
+    if let Some(answer) = answer {
+        outln!("Answers: {answer}");
+    }
+    if let Some(acts) = acts_on(id, doc).or_else(|| acts_on_given(doc).map(str::to_string)) {
+        outln!("{acts}");
+    }
+    outln!();
+    match outline(doc).as_str() {
+        "{}" => outln!("Run it with: vectorcraft-cli run --cmd {id}"),
+        _ => outln!("Run it with: vectorcraft-cli run --cmd {id} --params '{{…}}'"),
+    }
+    Ok(())
+}
+
+/// What a command that needs a selection acts on: found by asking the engine, with a document
+/// open and nothing selected, why the command isn't available.
+fn acts_on(id: &str, doc: &'static str) -> Option<String> {
+    use vectorcraft_engine::cmd::params::takes_key;
+    let h = Headless::with_document();
+    let reason = h.session.commands().into_iter().find(|c| c.id == id)?.disabled_reason?;
+    let on = match reason.as_str() {
+        "nothing selected" => "the selected objects",
+        "select at least two objects" => "two or more selected objects",
+        "no anchor points selected" => "the selected anchor points",
+        _ => return None,
+    };
+    let given = if takes_key(doc, "ids") {
+        ", or on `ids`"
+    } else if takes_key(doc, "id") {
+        ", or on `id`"
+    } else {
+        ""
+    };
+    Some(format!("Acts on {on}{given}."))
+}
+
+/// What a command that takes `ids` (or `id`) as an option, without needing a selection, acts on.
+/// A command that requires the id acts on that alone, and says nothing here.
+fn acts_on_given(doc: &'static str) -> Option<&'static str> {
+    use vectorcraft_engine::cmd::params::optional_key;
+    if optional_key(doc, "ids") {
+        Some("Acts on `ids`, else on the selected objects.")
+    } else if optional_key(doc, "id") {
+        Some("Acts on `id`, else on the selected objects.")
+    } else {
+        None
+    }
 }
 
 fn convert(args: &[String]) -> Result<(), String> {
@@ -235,7 +315,15 @@ fn convert(args: &[String]) -> Result<(), String> {
             f => files.push(f.to_string()),
         }
     }
-    let [input, output] = <[String; 2]>::try_from(files).map_err(|_| "convert needs IN and OUT")?;
+    let [input, output] = <[String; 2]>::try_from(files).map_err(|files: Vec<String>| match files.as_slice() {
+        [] => "convert takes IN and OUT, the file to read and the file to write, e.g. convert logo.ai logo.svg".to_string(),
+        [one] => format!("convert takes IN and OUT, the file to read and the file to write; it was given only `{one}`"),
+        many => format!(
+            "convert takes IN and OUT, then options; it was given {} files: {}. convert's options are --scale N, --artboard I, --range R, --outline-text, --decimals N, --replace-lossy and --editing-data",
+            many.len(),
+            many.join(", ")
+        ),
+    })?;
     let mut h = Headless::new();
     if editing_data {
         let params = json!({"path": input, "editingData": "always"});
@@ -255,7 +343,12 @@ fn convert(args: &[String]) -> Result<(), String> {
 }
 
 fn info(args: &[String]) -> Result<(), String> {
-    let file = args.first().ok_or("info needs a FILE")?;
+    let [file] = args else {
+        return Err(match args {
+            [] => "info takes FILE, the document to describe, e.g. info logo.ai".to_string(),
+            more => format!("info takes one FILE; it was given {}: {}", more.len(), more.iter().map(|a| shown(a)).collect::<Vec<_>>().join(", ")),
+        });
+    };
     let mut h = Headless::new();
     let opened = h.call("app.open", json!({"path": file})).map_err(|e| format!("open {file}: {e}"))?;
     let base = h.call("engine.execute", json!({"command": "file.info", "params": {}}))?;
@@ -276,46 +369,84 @@ enum Step {
     Export(String),
 }
 
-fn run(args: &[String]) -> Result<(), String> {
+/// `text`, at most 200 characters, for an error that echoes what was typed.
+fn shown(text: &str) -> String {
+    let short: String = text.chars().take(200).collect();
+    if short.len() < text.len() { format!("{short}…") } else { short }
+}
+
+/// What run takes, for an error about what it was given.
+const RUN_TAKES: &str = "run takes --in FILE, --cmd COMMAND, --params JSON (right after its --cmd), --export OUT, --scale N and --print";
+
+/// The flags of `run`, every one read before anything runs, so a mistake in one means nothing ran.
+fn run_args(args: &[String]) -> Result<(Option<String>, Vec<Step>, f64, bool), String> {
+    use vectorcraft_engine::cmd::params::{outline, takes};
     let mut input: Option<String> = None;
     let mut steps: Vec<Step> = vec![];
-    let mut scale = 1.0;
+    let (mut scale, mut print) = (1.0, false);
     let mut it = args.iter();
+    let cmd_count = args.iter().filter(|a| matches!(a.as_str(), "--cmd" | "-c")).count();
+    let mut cmds = 0;
     while let Some(a) = it.next() {
         let mut val = |what: &str| it.next().cloned().ok_or_else(|| format!("{a} needs {what}"));
         match a.as_str() {
-            "--in" | "-i" => input = Some(val("a file")?),
-            "--cmd" | "-c" => steps.push(Step::Cmd(val("a command id")?, json!({}))),
+            "--in" | "-i" => input = Some(val("a file, the document to open")?),
+            "--cmd" | "-c" => {
+                let id = val("a command id, e.g. --cmd shape.rectangle")?;
+                cmds += 1;
+                if vectorcraft_mcp::command_doc(&id).is_none() {
+                    let like = vectorcraft_engine::similar_commands(&id);
+                    let next = if id.starts_with('{') {
+                        " --cmd takes a command id; its parameters go in --params after it".to_string()
+                    } else if like.is_empty() {
+                        " `vectorcraft-cli commands` lists the commands".to_string()
+                    } else {
+                        format!(" Commands named like it: {}; `vectorcraft-cli commands` lists them all", like.join(", "))
+                    };
+                    return Err(format!("--cmd {cmds} of {cmd_count} was read as command `{}`, which is not a command.{next}", shown(&id)));
+                }
+                steps.push(Step::Cmd(id, json!({})));
+            }
             "--params" | "-p" => {
-                let raw = val("JSON")?;
-                let p: Value = serde_json::from_str(&raw).map_err(|e| format!("--params {raw}: {e}"))?;
+                let raw = val("a JSON object, the parameters of the --cmd before it")?;
+                let Some(Step::Cmd(id, params)) = steps.last_mut() else {
+                    return Err(format!("--params `{}` follows no --cmd: --params gives the parameters of the --cmd right before it", shown(&raw)));
+                };
+                let at = format!("--cmd {cmds} of {cmd_count} (`{id}`)");
+                let takes = vectorcraft_mcp::command_doc(id).map(|(_, doc)| takes(id, &outline(doc))).unwrap_or_default();
+                let p: Value = serde_json::from_str(&raw)
+                    .map_err(|e| format!("{at} was given --params `{}`, which is not JSON: {e}. {takes}, as one JSON object", shown(&raw)))?;
                 if !p.is_object() {
-                    return Err(format!("--params must be a JSON object, got {raw}"));
+                    return Err(format!("{at} was given --params `{}`, which is not a JSON object. {takes}, as one JSON object", shown(&raw)));
                 }
-                match steps.last_mut() {
-                    Some(Step::Cmd(_, params)) => *params = p,
-                    _ => return Err("--params must follow a --cmd".into()),
-                }
+                *params = p;
             }
-            "--export" | "-o" => steps.push(Step::Export(val("a file")?)),
+            "--export" | "-o" => steps.push(Step::Export(val("a file to write, named with its format's extension")?)),
             "--scale" | "-s" => {
-                let raw = val("a number")?;
-                scale = raw.parse::<f64>().map_err(|_| format!("--scale {raw}: not a number"))?;
+                let raw = val("a number, pixels per point")?;
+                scale = raw
+                    .parse::<f64>()
+                    .map_err(|_| format!("--scale was given `{}`, which is not a number: it takes pixels per point, e.g. --scale 2", shown(&raw)))?;
             }
-            other => return Err(format!("unknown run option `{other}`")),
+            "--print" => print = true,
+            other => return Err(format!("run was given `{}`, which it doesn't take. {RUN_TAKES}", shown(other))),
         }
     }
+    Ok((input, steps, scale, print))
+}
 
+fn run(args: &[String]) -> Result<(), String> {
+    let (input, steps, scale, print) = run_args(args).map_err(|e| format!("{e}. Nothing ran."))?;
     let mut h = Headless::new();
     let mut out = std::io::stdout().lock();
     // A reader that stopped early (a closed pipe) isn't an error, and the batch goes on: its later
     // steps (an export…) still run, unprinted.
     let mut closed = false;
-    let mut emit = |v: Value| {
+    let mut emit = |line: String| {
         if closed {
             return Ok(());
         }
-        match writeln!(out, "{v}") {
+        match writeln!(out, "{line}") {
             Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
                 closed = true;
                 Ok(())
@@ -323,29 +454,80 @@ fn run(args: &[String]) -> Result<(), String> {
             r => r.map_err(|e| e.to_string()),
         }
     };
+    let mut done = vec![];
     if let Some(path) = &input {
-        let r = h.call("app.open", json!({"path": path})).map_err(|e| format!("open {path}: {e}"))?;
-        emit(json!({"step": "open", "path": path, "result": r}))?;
+        let r = h.call("app.open", json!({"path": path})).map_err(|e| format!("--in {path}: {e}. Nothing ran."))?;
+        let warnings: Vec<&str> = r["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        if !warnings.is_empty() {
+            emit(format!("opened {path} with warnings: {}", warnings.join("; ")))?;
+        } else if print {
+            emit(format!("opened {path}"))?;
+        }
+        done.push(format!("opened {path}"));
     } else if !matches!(steps.first(), Some(Step::Cmd(id, _)) if id == "file.new") {
         h.ensure_document();
     }
+    let total = steps.iter().filter(|s| matches!(s, Step::Cmd(..))).count();
+    // What a failing step leaves undone: the exports after it, named, so the agent knows what
+    // isn't on disk.
+    let left_undone = |from: usize| -> String {
+        let exports: Vec<&str> =
+            steps.get(from..).into_iter().flatten().filter_map(|s| if let Step::Export(p) = s { Some(p.as_str()) } else { None }).collect();
+        match (steps.len() > from, exports.is_empty()) {
+            (false, _) => String::new(),
+            (true, true) => " Nothing after it ran.".into(),
+            (true, false) => format!(" Nothing after it ran: {} not written.", exports.join(", ")),
+        }
+    };
     // Each step's result, for later steps to refer to (`"$1.id"`, see `vectorcraft_engine::steps`).
     let mut results = vec![];
-    for step in steps {
+    let mut shown_answers = 0;
+    let (mut n, mut exported) = (0, vec![]);
+    for (i, step) in steps.iter().enumerate() {
         let r = match step {
             Step::Cmd(id, params) => {
-                let params = vectorcraft_engine::steps::resolve(&params, &results).map_err(|e| format!("{id}: {e}"))?;
-                let r = h.call("engine.execute", json!({"command": id, "params": params})).map_err(|e| format!("{id}: {e}"))?;
-                emit(json!({"step": "cmd", "command": id, "result": r}))?;
+                n += 1;
+                let at = format!("--cmd {n} of {total} (`{id}`)");
+                let params = vectorcraft_engine::steps::resolve(params, &results).map_err(|e| format!("{at}: {e}.{}", left_undone(i + 1)))?;
+                let r = h
+                    .call("engine.execute", json!({"command": id, "params": params}))
+                    .map_err(|e| format!("{at}: {}.{}", e.trim_end_matches('.'), left_undone(i + 1)))?;
+                if print {
+                    match &r {
+                        Value::String(said) => emit(format!("{id} → {said}"))?,
+                        r => emit(format!("{id} → {r}"))?,
+                    }
+                } else if !r.is_string() {
+                    shown_answers += 1;
+                }
                 r
             }
             Step::Export(path) => {
-                let r = h.call("app.export", json!({"path": path, "scale": scale})).map_err(|e| format!("export {path}: {e}"))?;
-                emit(json!({"step": "export", "result": r}))?;
+                let r = h
+                    .call("app.export", json!({"path": path, "scale": scale}))
+                    .map_err(|e| format!("--export {path}: {}.{}", e.trim_end_matches('.'), left_undone(i + 1)))?;
+                let warnings: Vec<&str> = r["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                if !warnings.is_empty() {
+                    emit(format!("exported {path} with warnings: {}", warnings.join("; ")))?;
+                } else if print {
+                    emit(format!("exported {path}"))?;
+                }
+                exported.push(path.as_str());
                 r
             }
         };
         results.push(r);
+    }
+    if !print {
+        done.push(match total {
+            1 => "1 command ran".to_string(),
+            n => format!("{n} commands ran"),
+        });
+        if !exported.is_empty() {
+            done.push(format!("exported {}", exported.join(", ")));
+        }
+        let hint = if shown_answers > 0 { "; --print shows each command's answer" } else { "" };
+        emit(format!("OK: {}{hint}", done.join(", ")))?;
     }
     Ok(())
 }
@@ -364,10 +546,10 @@ fn bench(args: &[String]) -> Result<(), String> {
             }
             "--iters" => iters = it.next().and_then(|v| v.parse().ok()).ok_or("--iters needs a number")?,
             f if file.is_none() => file = Some(f.to_string()),
-            other => return Err(format!("unknown bench option `{other}`")),
+            other => return Err(format!("bench was given `{other}`, which it doesn't take. bench takes FILE, --size WxH and --iters N")),
         }
     }
-    let file = file.ok_or("bench needs a FILE")?;
+    let file = file.ok_or("bench takes FILE, the document to render, e.g. bench poster.ai")?;
     let mut hl = Headless::new();
     hl.call("app.open", json!({ "path": file })).map_err(|e| format!("open {file}: {e}"))?;
     let doc = hl.session.doc().map_err(|e| e.to_string())?.doc.clone();

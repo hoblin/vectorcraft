@@ -193,6 +193,9 @@ pub type OpenUrlFn = Box<dyn FnMut(&str)>;
 
 /// Shows a file in the system file manager, or opens it in its app.
 pub type RevealFn = Box<dyn FnMut(&str) -> Result<(), String>>;
+/// How a command reaches the engine: [`Session::execute`] for the app's own calls,
+/// [`Session::call`] for callers outside it, which get their answers in words.
+type Engine = fn(&mut Session, &str, &Value) -> vectorcraft_engine::Result<Value>;
 
 /// Platform services injected by the host app (desktop or web).
 #[derive(Default)]
@@ -607,18 +610,29 @@ impl VectorcraftApp {
         })
     }
 
-    /// Run a UI or engine command by id. The single entry point for every frontend path.
+    /// Run a UI or engine command by id: the app's own calls. [`Self::dispatch`] is the one path
+    /// under this and [`Self::call`].
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        self.dispatch(id, params, vectorcraft_engine::Session::execute)
+    }
+
+    /// [`Self::run`] for a caller outside the app (the control channel): the engine answers in
+    /// words ([`vectorcraft_engine::Session::call`]).
+    pub fn call(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        self.dispatch(id, params, vectorcraft_engine::Session::call)
+    }
+
+    fn dispatch(&mut self, id: &str, params: Value, engine: Engine) -> Result<Value, String> {
         // A file dialog it shows off the UI thread runs it again with the path picked.
         if self.picks.is_entry_free() {
             let entry = picks::Entry::Command(id.to_string(), params.clone());
-            return picks::as_entry(self, move || entry, |app| app.run_now(id, params));
+            return picks::as_entry(self, move || entry, |app| app.run_now(id, params, engine));
         }
-        self.run_now(id, params)
+        self.run_now(id, params, engine)
     }
 
-    /// [`Self::run`] it, inside what asks for file dialogs.
-    fn run_now(&mut self, id: &str, params: Value) -> Result<Value, String> {
+    /// [`Self::run`] it, inside what asks for file dialogs, with `engine` running the command.
+    fn run_now(&mut self, id: &str, params: Value, engine: Engine) -> Result<Value, String> {
         self.run_count = self.run_count.wrapping_add(1);
         // In debug builds the app's own calls are held to the params descriptions too (#1442): a
         // panel passing a key its command doesn't read shows up in the tests.
@@ -660,7 +674,7 @@ impl VectorcraftApp {
         if fileio::SaveMode::of(id).is_some() {
             io::remember_view(self);
         }
-        let r = self.session.execute(id, &params).map_err(|e| e.to_string());
+        let r = engine(&mut self.session, id, &params).map_err(|e| e.to_string());
         if r.is_ok() && matches!(id, "edit.copy" | "edit.cut") {
             self.publish_clipboard();
         }

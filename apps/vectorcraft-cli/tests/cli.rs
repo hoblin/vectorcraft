@@ -13,13 +13,62 @@ fn tmp(name: &str) -> std::path::PathBuf {
     dir.join(name)
 }
 
+/// What the CLI printed on stdout (exit 0) or on stderr (exit 1), as one string.
+fn stdout(args: &[&str]) -> String {
+    let out = Command::new(BIN).args(args).output().unwrap();
+    assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+fn stderr(args: &[&str]) -> String {
+    let out = Command::new(BIN).args(args).output().unwrap();
+    assert!(!out.status.success(), "{args:?} succeeded: {}", String::from_utf8_lossy(&out.stdout));
+    String::from_utf8(out.stderr).unwrap().trim_end().to_string()
+}
+/// `s` with its whitespace collapsed, so wrapping doesn't matter.
+fn words(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[test]
-fn commands_prints_catalogue() {
-    let out = Command::new(BIN).arg("commands").output().unwrap();
-    assert!(out.status.success());
-    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-    let ids: Vec<&str> = v.as_array().unwrap().iter().filter_map(|c| c["id"].as_str()).collect();
-    assert!(ids.contains(&"shape.rectangle") && ids.contains(&"object.group") && ids.contains(&"file.export"));
+fn commands_lists_one_command_per_line() {
+    let out = stdout(&["commands"]);
+    assert!(out.contains("\nshape.rectangle — Rectangle: {x, y, width, height, radius?, rotation?} → {id}\n"), "{out}");
+    assert!(out.contains("\nobject.group — Group → {id}\n") && out.contains("\nfile.export — Export…: {"), "{out}");
+    assert!(out.contains("\nselect.none — Deselect\n"), "{out}");
+    // Grouped by the first segment: a blank line between `select.*` and `shape.*`.
+    assert!(out.contains("\n\nshape.arc — Arc"), "{out}");
+    let out = stdout(&["commands", "SHAPE."]);
+    assert!(out.lines().filter(|l| !l.is_empty()).all(|l| l.to_ascii_lowercase().contains("shape.")), "{out}");
+    assert_eq!(stderr(&["commands", "zzzz"]), "vectorcraft-cli: no command's id or name contains `zzzz`; `vectorcraft-cli commands` lists them all");
+}
+
+#[test]
+fn describe_spells_a_command_out() {
+    assert_eq!(
+        stdout(&["describe", "shape.rectangle"]),
+        "shape.rectangle — Rectangle\n\nParameters: {x, y, width, height, radius?: pt, rotation?: deg (about centre)}\nAnswers: {id}\n\nRun it with: vectorcraft-cli run --cmd shape.rectangle --params '{…}'\n"
+    );
+    assert_eq!(
+        stdout(&["describe", "object.group"]),
+        "object.group — Group, in the Object menu\n\nTakes no parameters.\nAnswers: {id}\nActs on the selected objects.\n\nRun it with: vectorcraft-cli run --cmd object.group\n"
+    );
+    let fill = stdout(&["describe", "paint.setFill"]);
+    assert!(
+        fill.starts_with("paint.setFill — Fill\n\nParameters: {color?:") && fill.contains("\nActs on `ids`, else on the selected objects.\n"),
+        "{fill}"
+    );
+    assert!(stdout(&["describe", "file.open"]).starts_with("file.open — Open…\n\nParameters: {path}"));
+    assert_eq!(stderr(&["describe", "nope.nothing"]), "vectorcraft-cli: unknown command `nope.nothing`. `vectorcraft-cli commands` lists them.");
+    assert_eq!(
+        stderr(&["describe", "shape.rectangle", "--foo"]),
+        "vectorcraft-cli: describe takes one command id; it was given 2: shape.rectangle, --foo"
+    );
+    assert!(stderr(&["describe"]).starts_with("vectorcraft-cli: describe takes one command id, e.g."));
+    // A required id is the command's target, not a stand-in for the selection.
+    let node = stdout(&["describe", "document.node"]);
+    assert!(!node.contains("Acts on"), "{node}");
+    let tiling = stdout(&["describe", "print.tiling.set"]);
+    assert!(tiling.contains("\nAnswers: {tileOrigin}\n"), "{tiling}");
 }
 
 #[test]
@@ -35,8 +84,10 @@ fn run_batch_exports() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let lines: Vec<Value> = String::from_utf8(out.stdout).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-    assert_eq!(lines.len(), 6);
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        format!("OK: 3 commands ran, exported {}, {}, {}; --print shows each command's answer\n", svg.display(), png.display(), dc.display())
+    );
     assert!(std::fs::read_to_string(&svg).unwrap().contains("3366ff"));
     let png_bytes = std::fs::read(&png).unwrap();
     assert_eq!(&png_bytes[..4], b"\x89PNG");
@@ -44,19 +95,196 @@ fn run_batch_exports() {
     assert_eq!(u32::from_be_bytes(png_bytes[16..20].try_into().unwrap()), 400);
 
     // Re-open the native file and inspect.
-    let out = Command::new(BIN).args(["run", "--in", dc.to_str().unwrap(), "--cmd", "document.inspect"]).output().unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let last: Value = serde_json::from_str(String::from_utf8(out.stdout).unwrap().lines().last().unwrap()).unwrap();
-    assert_eq!(last["result"]["artboards"][0]["width"], 200.0);
+    let out = stdout(&["run", "--in", dc.to_str().unwrap(), "--print", "--cmd", "document.inspect"]);
+    let (open, inspect) = out.trim_end().split_once('\n').unwrap();
+    assert_eq!(open, format!("opened {}", dc.display()));
+    let inspected: Value = serde_json::from_str(inspect.strip_prefix("document.inspect → ").unwrap()).unwrap();
+    assert_eq!(inspected["artboards"][0]["width"], 200.0);
+}
+
+/// Without --print, run confirms what it did in one line; with it, each command's answer.
+#[test]
+fn print_shows_what_each_command_did() {
+    let rect = r#"{"x":10,"y":10,"width":50,"height":40}"#;
+    assert_eq!(
+        stdout(&["run", "--cmd", "shape.rectangle", "--params", rect, "--cmd", "select.none"]),
+        "OK: 2 commands ran; --print shows each command's answer\n"
+    );
+    assert_eq!(stdout(&["run", "--cmd", "select.none"]), "OK: 1 command ran\n");
+    assert_eq!(
+        stdout(&[
+            "run",
+            "--print",
+            "--cmd",
+            "shape.rectangle",
+            "--params",
+            rect,
+            "--cmd",
+            "paint.setFill",
+            "--params",
+            r##"{"color":"#ff0000"}"##,
+            "--cmd",
+            "select.none"
+        ]),
+        "shape.rectangle → {\"id\":2}\npaint.setFill → changed the fill of rectangle #2\nselect.none → no object is selected\n"
+    );
+}
+
+/// A mistake in the flags means nothing ran; the error mirrors what was read and says what to
+/// type instead.
+#[test]
+fn a_flag_mistake_is_read_back_and_nothing_runs() {
+    let rect = r#"{"x":10,"y":10,"width":50,"height":40}"#;
+    assert_eq!(
+        stderr(&["run", "--cmd", "shape.rectangel"]),
+        "vectorcraft-cli: --cmd 1 of 1 was read as command `shape.rectangel`, which is not a command. Commands named like it: shape.rectangle, shape.rectangularGrid, path.rectCut; `vectorcraft-cli commands` lists them all. Nothing ran."
+    );
+    assert_eq!(
+        stderr(&["run", "--cmd", r#"{"x":1}"#]),
+        "vectorcraft-cli: --cmd 1 of 1 was read as command `{\"x\":1}`, which is not a command. --cmd takes a command id; its parameters go in --params after it. Nothing ran."
+    );
+    let bad_json = stderr(&["run", "--cmd", "shape.rectangle", "--params", r#"{"x":10,"#]);
+    assert!(
+        bad_json
+            .starts_with("vectorcraft-cli: --cmd 1 of 1 (`shape.rectangle`) was given --params `{\"x\":10,`, which is not JSON: EOF while parsing")
+            && bad_json.ends_with(". `shape.rectangle` takes {x, y, width, height, radius?, rotation?}, as one JSON object. Nothing ran."),
+        "{bad_json}"
+    );
+    assert_eq!(
+        stderr(&["run", "--cmd", "shape.rectangle", "--params", r#"{"x":10,"y":10,"width":50,"height":40}"#, "--scale", "big"]),
+        "vectorcraft-cli: --scale was given `big`, which is not a number: it takes pixels per point, e.g. --scale 2. Nothing ran."
+    );
+    assert_eq!(stderr(&["run", "--in"]), "vectorcraft-cli: --in needs a file, the document to open. Nothing ran.");
+    assert_eq!(
+        stderr(&["run", "--cmd", "nope"]),
+        "vectorcraft-cli: --cmd 1 of 1 was read as command `nope`, which is not a command. `vectorcraft-cli commands` lists the commands. Nothing ran."
+    );
+    assert_eq!(
+        stderr(&["run", "--cmd", "shape.rectangle", "--params", "[1]"]),
+        "vectorcraft-cli: --cmd 1 of 1 (`shape.rectangle`) was given --params `[1]`, which is not a JSON object. `shape.rectangle` takes {x, y, width, height, radius?, rotation?}, as one JSON object. Nothing ran."
+    );
+    assert_eq!(
+        stderr(&["run", "--params", "{}"]),
+        "vectorcraft-cli: --params `{}` follows no --cmd: --params gives the parameters of the --cmd right before it. Nothing ran."
+    );
+    assert_eq!(stderr(&["run", "--cmd"]), "vectorcraft-cli: --cmd needs a command id, e.g. --cmd shape.rectangle. Nothing ran.");
+    assert_eq!(
+        stderr(&["run", "--foo"]),
+        "vectorcraft-cli: run was given `--foo`, which it doesn't take. run takes --in FILE, --cmd COMMAND, --params JSON (right after its --cmd), --export OUT, --scale N and --print. Nothing ran."
+    );
+    let svg = tmp("nothing-ran.svg");
+    let _ = std::fs::remove_file(&svg);
+    let err = stderr(&["run", "--cmd", "shape.rectangle", "--params", rect, "--export", svg.to_str().unwrap(), "--cmd", "nope"]);
+    assert_eq!(
+        err,
+        "vectorcraft-cli: --cmd 2 of 2 was read as command `nope`, which is not a command. `vectorcraft-cli commands` lists the commands. Nothing ran.",
+        "the export before the mistaken step is left unwritten too"
+    );
+    assert!(!svg.exists(), "an export before the mistaken step still didn't run");
+}
+
+/// A failing command names its place, what went wrong and what to do, and what after it is left
+/// undone.
+#[test]
+fn a_failing_command_says_which_and_what_is_left_undone() {
+    let rect = r#"{"x":10,"y":10,"width":50,"height":40}"#;
+    let svg = tmp("undone.svg");
+    assert_eq!(
+        stderr(&[
+            "run",
+            "--cmd",
+            "shape.rectangle",
+            "--params",
+            rect,
+            "--cmd",
+            "object.lock",
+            "--params",
+            r#"{"ids":[2]}"#,
+            "--cmd",
+            "select.all",
+            "--export",
+            svg.to_str().unwrap()
+        ]),
+        format!(
+            "vectorcraft-cli: --cmd 2 of 3 (`object.lock`): invalid parameters for `object.lock`: unknown parameter `ids`; `object.lock` takes no parameters. Nothing after it ran: {} not written.",
+            svg.display()
+        )
+    );
+    assert_eq!(
+        stderr(&["run", "--cmd", "object.group"]),
+        "vectorcraft-cli: --cmd 1 of 1 (`object.group`): command `object.group` is not available right now: nothing selected. It acts on the selected objects; select.set {\"ids\": […]} selects objects, select.all every object."
+    );
+    assert_eq!(
+        stderr(&["run", "--cmd", "select.none", "--cmd", "edit.clear", "--params", r#"{"ids":[999]}"#]),
+        "vectorcraft-cli: --cmd 2 of 2 (`edit.clear`): invalid parameters for `edit.clear`: no object #999 in the document; document.inspect lists the objects with their ids; `edit.clear` takes {ids?}."
+    );
+    assert_eq!(
+        stderr(&["run", "--cmd", "artboard.delete", "--params", r#"{"index":5}"#]),
+        "vectorcraft-cli: --cmd 1 of 1 (`artboard.delete`): no artboard 5 (0-based; the document has 1)."
+    );
+    let missing = stderr(&["run", "--in", "nothere.svg", "--cmd", "select.all"]);
+    assert!(
+        missing.starts_with("vectorcraft-cli: --in nothere.svg: ") && missing.contains("(os error 2)") && missing.ends_with(". Nothing ran."),
+        "{missing}"
+    );
+    assert_eq!(
+        stderr(&["run", "--cmd", "select.none", "--cmd", "object.group", "--cmd", "select.all"]),
+        "vectorcraft-cli: --cmd 2 of 3 (`object.group`): command `object.group` is not available right now: nothing selected. It acts on the selected objects; select.set {\"ids\": […]} selects objects, select.all every object. Nothing after it ran."
+    );
+    assert_eq!(
+        stderr(&["run", "--cmd", "paint.setFill", "--params", r##"{"ids":["$7.id"],"color":"#ff0000"}"##]),
+        "vectorcraft-cli: --cmd 1 of 1 (`paint.setFill`): `$7.id`: there is no step 7 before this one (steps count from 0; write $$ for a literal $)."
+    );
+}
+
+/// With --in, the OK line says what was opened.
+#[test]
+fn without_print_run_names_the_file_it_opened() {
+    let svg = tmp("opened.svg");
+    std::fs::write(&svg, r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"><rect width="20" height="10"/></svg>"#).unwrap();
+    assert_eq!(
+        stdout(&["run", "--in", svg.to_str().unwrap(), "--cmd", "select.all"]),
+        format!("OK: opened {}, 1 command ran; --print shows each command's answer\n", svg.display())
+    );
+}
+
+/// Every subcommand answers `--help` (and `help SUB`) with its page and does nothing else.
+#[test]
+fn every_subcommand_answers_help_and_does_nothing_else() {
+    let dir = tmp("help-does-nothing");
+    std::fs::create_dir_all(&dir).unwrap();
+    for sub in ["run", "commands", "describe", "convert", "info", "mcp", "bench", "perf"] {
+        let out = Command::new(BIN).args([sub, "--help"]).current_dir(&dir).output().unwrap();
+        let page = String::from_utf8(out.stdout).unwrap();
+        assert!(out.status.success() && page.starts_with(&format!("usage: vectorcraft-cli {sub}")), "{sub}: {page}");
+        assert_eq!(page, stdout(&["help", sub]), "{sub}");
+        assert_eq!(page, stdout(&[sub, "-h"]), "{sub}");
+    }
+    assert!(std::fs::read_dir(&dir).unwrap().next().is_none(), "a --help wrote a file");
+    let overview = stdout(&[]);
+    assert_eq!(overview, stdout(&["help"]));
+    assert_eq!(overview, stdout(&["--help"]));
+    assert!(
+        overview.starts_with("vectorcraft-cli works on VectorCraft documents")
+            && overview.contains("\n  run        run commands on a document, then export it\n"),
+        "{overview}"
+    );
+    assert!(stderr(&["bogus"]).starts_with("vectorcraft-cli: `bogus` is not a subcommand.\n\nvectorcraft-cli works on"));
 }
 
 #[test]
-fn run_reports_errors() {
-    let out = Command::new(BIN).args(["run", "--cmd", "nope.nothing"]).output().unwrap();
-    assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("nope.nothing"));
-    let out = Command::new(BIN).args(["run", "--params", "{}"]).output().unwrap();
-    assert!(!out.status.success());
+fn run_help_says_what_the_ids_do_not() {
+    let page = words(&stdout(&["run", "--help"]));
+    for fact in [
+        "Positions and sizes are in points, x to the right and y down",
+        "Every object has an id. document.inspect lists them",
+        "A command that draws (shape.*, text.create, file.place…) selects what it drew and answers its id.",
+        "Artboard indices start at 0",
+        "\"$N.id\" is the id step N answered",
+        "Without --print, run ends with one line, e.g. `OK: 3 commands ran, exported logo.svg`",
+    ] {
+        assert!(page.contains(fact), "{fact}\n{page}");
+    }
 }
 
 #[test]

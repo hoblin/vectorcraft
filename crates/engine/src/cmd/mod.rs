@@ -327,9 +327,14 @@ pub(crate) fn checked_ids_or_selection(s: &Session, p: &Value, command: &str) ->
 pub(crate) fn checked_id(s: &Session, value: &Value, command: &str) -> Result<NodeId> {
     let id = value.as_u64().map(NodeId).ok_or_else(|| bad(command, format!("invalid object id {value}: expected a non-negative integer")))?;
     if s.doc()?.doc.node(id).is_none() {
-        return Err(bad(command, format!("no such object id {value}")));
+        return Err(bad(command, s.no_object(id)));
     }
     Ok(id)
+}
+
+/// The error for artboard index `i` of a document with `n` artboards, which has none there.
+pub(crate) fn no_artboard(i: usize, count: usize) -> EngineError {
+    EngineError::Other(format!("no artboard {i} (0-based; the document has {count})"))
 }
 
 /// `v` as exactly `N` finite numbers (`[x, y]`, `[x, y, width, height]`…): `None` when it isn't an

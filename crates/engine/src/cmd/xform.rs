@@ -389,7 +389,8 @@ fn artboard_move(s: &mut Session, p: &Value) -> Result<Value> {
                 moved.extend(copies);
                 continue;
             }
-            let a = d.artboards.get_mut(*i).ok_or_else(|| EngineError::Other("no such artboard".into()))?;
+            let n = d.artboards.len();
+            let a = d.artboards.get_mut(*i).ok_or_else(|| super::no_artboard(*i, n))?;
             a.rect = a.rect + dv;
             let id = a.id;
             d.move_artboard_guides(id, dv);

@@ -806,7 +806,8 @@ fn artboard_delete(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn artboard_set(s: &mut Session, p: &Value) -> Result<Value> {
     let i = p.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-    let was = s.doc()?.doc.artboards.get(i).map(|a| a.rect).ok_or_else(|| EngineError::Other("no such artboard".into()))?;
+    let boards = &s.doc()?.doc.artboards;
+    let was = boards.get(i).map(|a| a.rect).ok_or_else(|| super::no_artboard(i, boards.len()))?;
     let now = rect_from(p, was);
     let resized = (now.width() - was.width()).abs() > 1e-6 || (now.height() - was.height()).abs() > 1e-6;
     // Scale Artwork with Artboard: resized, it takes the art fully inside it (as Move Artwork with
@@ -833,7 +834,8 @@ fn artboard_set(s: &mut Session, p: &Value) -> Result<Value> {
     };
     sc.patterns = super::object::transform_patterns(s, p, &art)?;
     s.edit("Artboard Options", |d, _| {
-        let a = d.artboards.get_mut(i).ok_or_else(|| EngineError::Other("no such artboard".into()))?;
+        let n = d.artboards.len();
+        let a = d.artboards.get_mut(i).ok_or_else(|| super::no_artboard(i, n))?;
         a.rect = now;
         if let Some(n) = str_param(p, "name") {
             a.name = n.to_string();

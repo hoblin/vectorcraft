@@ -51,6 +51,16 @@ const HOST_COMMANDS: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// The label and params description of command `id`, an engine command or one of the host's;
+/// `None` when `id` isn't a command.
+pub fn command_doc(id: &str) -> Option<(&'static str, &'static str)> {
+    HOST_COMMANDS
+        .iter()
+        .find(|c| c.0 == id)
+        .map(|(_, label, doc)| (*label, *doc))
+        .or_else(|| vectorcraft_engine::find_command(id).map(|c| (c.label, c.params)))
+}
+
 fn s<'a>(p: &'a Value, k: &str) -> Option<&'a str> {
     p.get(k).and_then(Value::as_str)
 }
@@ -126,19 +136,17 @@ impl Headless {
 
     fn exec(&mut self, id: &str, params: &Value) -> Result<Value, String> {
         // A key the command's description doesn't name is an error, not a default (#1442).
-        match HOST_COMMANDS.iter().find(|c| c.0 == id) {
-            Some((_, _, doc)) => vectorcraft_engine::check_keys(id, doc, params),
-            None => self.session.check_params(id, params),
+        if let Some((_, _, doc)) = HOST_COMMANDS.iter().find(|c| c.0 == id) {
+            vectorcraft_engine::check_keys(id, doc, params).map_err(|e| e.to_string())?;
         }
-        .map_err(|e| e.to_string())?;
         match id {
             "file.open" => self.open(params),
             "file.save" => self.save(params),
             "file.export" => self.export(params),
-            "file.exportForScreens" => self.session.execute("document.exportForScreens", params).map_err(|e| e.to_string()),
+            "file.exportForScreens" => self.session.call("document.exportForScreens", params).map_err(|e| e.to_string()),
             "tool.select" => self.select_tool(params),
             "tool.setOption" => self.session.set_tool_option_cmd(params),
-            _ => self.session.execute(id, params).map_err(|e| e.to_string()),
+            _ => self.session.call(id, params).map_err(|e| e.to_string()),
         }
     }
 
@@ -241,7 +249,8 @@ impl Headless {
         let st = self.session.active().ok_or("no document")?;
         let doc = st.doc.clone();
         let idx = p.get("artboard").and_then(Value::as_u64).unwrap_or(0) as usize;
-        let r = doc.artboards.get(idx).map(|a| a.rect).ok_or("no such artboard")?;
+        let r =
+            doc.artboards.get(idx).map(|a| a.rect).ok_or_else(|| format!("no artboard {idx} (0-based; the document has {})", doc.artboards.len()))?;
         let scale = p.get("scale").and_then(Value::as_f64).unwrap_or(1.0).clamp(0.01, 16.0);
         vectorcraft_render::raster_size(r, scale)?;
         let img = self.renderer.render_region(&doc, r, scale, true);
@@ -265,7 +274,7 @@ impl Headless {
     /// `app.open {path}`: any readable file as a new active document (`document.open`).
     pub fn open(&mut self, p: &Value) -> Result<Value, String> {
         let path = s(p, "path").ok_or("missing `path`")?;
-        self.session.execute("document.open", &json!({"path": path})).map_err(|e| e.to_string())
+        self.session.call("document.open", &json!({"path": path})).map_err(|e| e.to_string())
     }
 
     /// `app.save {path?, format?, options?}`: `document.save` (by default the document's own path and
@@ -275,12 +284,12 @@ impl Headless {
         if s(p, "path").is_none() && st.path.is_none() {
             return Err("missing `path` (document was never saved)".into());
         }
-        self.session.execute("document.save", p).map_err(|e| e.to_string())
+        self.session.call("document.save", p).map_err(|e| e.to_string())
     }
 
     /// `app.export {path?, format?, …}`: `document.export` (format defaults to the path's extension).
     pub fn export(&mut self, p: &Value) -> Result<Value, String> {
-        self.session.execute("document.export", p).map_err(|e| e.to_string())
+        self.session.call("document.export", p).map_err(|e| e.to_string())
     }
 }
 

@@ -143,14 +143,10 @@ pub fn handle(app: &mut VectorcraftApp, ctx: &egui::Context, req: &ControlReques
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
             let params = p.get("params").cloned().unwrap_or(json!({}));
             let params = if params.is_null() { json!({}) } else { params };
-            // A key the command's description doesn't name is an error, not a default (#1442).
-            if let Err(e) = crate::menus::check_params(&app.session, id, &params) {
-                return err(e);
-            }
-            wrap(app.run(id, params))
+            wrap(app.call(id, params))
         }
         "engine.commands" => ok(all_commands(app)),
-        "document.inspect" => wrap(app.run("document.inspect", p.clone())),
+        "document.inspect" => wrap(app.call("document.inspect", p.clone())),
         "ui.inspect" => ok(inspect(app, ctx)),
         "ui.menu.list" => ok(serde_json::to_value(crate::menus::menu_entries(app)).unwrap_or_default()),
         "ui.contextMenu.list" => ok(serde_json::to_value(crate::menus::context_entries(app)).unwrap_or_default()),
@@ -332,7 +328,9 @@ pub fn handle(app: &mut VectorcraftApp, ctx: &egui::Context, req: &ControlReques
             let doc = st.doc.clone();
             // The artboard asked for (0-based, as headless), else the first.
             let index = p.get("artboard").and_then(Value::as_u64).map_or(Some(0), |i| usize::try_from(i).ok());
-            let Some(r) = index.and_then(|i| doc.artboards.get(i)).map(|a| a.rect) else { return err("no such artboard") };
+            let Some(r) = index.and_then(|i| doc.artboards.get(i)).map(|a| a.rect) else {
+                return err(format!("no artboard {} (0-based; the document has {})", p["artboard"], doc.artboards.len()));
+            };
             let scale = p.get("scale").and_then(Value::as_f64).unwrap_or(1.0);
             if let Err(e) = vectorcraft_render::raster_size(r, scale) {
                 return err(e);
@@ -438,6 +436,28 @@ mod tests {
             assert_eq!(got, size.map(Some), "{params}: {r}");
         }
         assert!(request("ui.render", json!({"artboard": 2}))["error"].is_string());
+    }
+
+    /// `engine.execute` answers an agent in words ([`vectorcraft_engine::Session::call`]): what a
+    /// command changed, and what makes an unavailable one available.
+    #[test]
+    fn engine_execute_answers_in_words() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut app = VectorcraftApp::new(Session::new(), Services::default()).with_control(rx);
+        let mut request = |method: &str, params: Value| {
+            let (req, reply) = ControlRequest::new(method, params);
+            tx.send(req).unwrap();
+            app.drain_control(&egui::Context::default());
+            reply.try_recv().unwrap()
+        };
+        request("engine.execute", json!({"command": "file.new", "params": {}}));
+        request("engine.execute", json!({"command": "shape.rectangle", "params": {"x": 10, "y": 10, "width": 50, "height": 40}}));
+        let r = request("engine.execute", json!({"command": "paint.setFill", "params": {"color": "#ff0000"}}));
+        assert_eq!(r, json!({"ok": true, "result": "changed the fill of rectangle #2"}));
+        request("engine.execute", json!({"command": "select.none"}));
+        let r = request("engine.execute", json!({"command": "object.group"}));
+        assert_eq!(r["ok"], false);
+        assert!(r["error"].as_str().unwrap().ends_with("select.all every object."), "{r}");
     }
 
     /// `ui.pointer` replies with the key object: a click on one of two selected objects makes it

@@ -524,7 +524,8 @@ fn guide_add(s: &mut Session, p: &Value) -> Result<Value> {
     let artboard = match p.get("artboard").filter(|v| !v.is_null()) {
         Some(v) => {
             let boards = &s.doc()?.doc.artboards;
-            let ab = v.as_u64().and_then(|i| boards.get(usize::try_from(i).ok()?)).ok_or_else(|| EngineError::Other("no such artboard".into()))?;
+            let i = v.as_u64().and_then(|i| usize::try_from(i).ok()).ok_or_else(|| EngineError::Other(format!("`artboard` is an index, not {v}")))?;
+            let ab = boards.get(i).ok_or_else(|| super::no_artboard(i, boards.len()))?;
             Some(ab.id)
         }
         None => None,

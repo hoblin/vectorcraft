@@ -58,7 +58,7 @@ fn artboard_reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let to = p.get("to").and_then(Value::as_u64).ok_or_else(|| bad(C, "missing to"))? as usize;
     s.edit("Reorder Artboards", |d, _| {
         if i >= d.artboards.len() {
-            return Err(EngineError::Other("no such artboard".into()));
+            return Err(super::no_artboard(i, d.artboards.len()));
         }
         let a = d.artboards.remove(i);
         let to = to.min(d.artboards.len());
@@ -86,8 +86,13 @@ pub(crate) fn artboard_indices(d: &vectorcraft_doc::Document, p: &Value, cmd: &s
         (None, Some(i)) => point_indices(&json!([i])),
         (None, None) => return Err(bad(cmd, "missing index")),
     };
-    let mut indices =
-        listed.filter(|v| !v.is_empty() && v.iter().all(|i| *i < d.artboards.len())).ok_or_else(|| EngineError::Other("no such artboard".into()))?;
+    let mut indices = listed.ok_or_else(|| bad(cmd, "`index` is an artboard index and `indices` a list of them: non-negative integers"))?;
+    if let Some(i) = indices.iter().find(|i| **i >= d.artboards.len()) {
+        return Err(super::no_artboard(*i, d.artboards.len()));
+    }
+    if indices.is_empty() {
+        return Err(bad(cmd, "`indices` is empty"));
+    }
     indices.sort_unstable();
     indices.dedup();
     Ok(indices)
@@ -95,7 +100,7 @@ pub(crate) fn artboard_indices(d: &vectorcraft_doc::Document, p: &Value, cmd: &s
 
 pub(crate) fn artboard_art(s: &Session, i: usize, art: bool) -> Result<Vec<NodeId>> {
     let d = &s.doc()?.doc;
-    let rect = d.artboards.get(i).map(|a| a.rect).ok_or_else(|| EngineError::Other("no such artboard".into()))?;
+    let rect = d.artboards.get(i).map(|a| a.rect).ok_or_else(|| super::no_artboard(i, d.artboards.len()))?;
     Ok(if art { d.art_on_artboard(rect, s.prefs.move_locked_with_artboard) } else { vec![] })
 }
 
@@ -125,13 +130,13 @@ pub(crate) fn artboard_copy(s: &mut Session, p: &Value, cut: bool) -> Result<Val
     if cut && st.doc.artboards.len() <= 1 {
         return Err(EngineError::Other("a document needs at least one artboard".into()));
     }
-    let board = st.doc.artboards.get(i).cloned().ok_or_else(|| EngineError::Other("no such artboard".into()))?;
+    let board = st.doc.artboards.get(i).cloned().ok_or_else(|| super::no_artboard(i, st.doc.artboards.len()))?;
     let clip = Clipboard { source_artboard: Some(board.rect), artboard: Some(board), ..Clipboard::copy(st, &art) };
     let copied = clip.nodes.len();
     if cut {
         s.edit("Cut Artboard", |d, sel| {
             if i >= d.artboards.len() {
-                return Err(EngineError::Other("no such artboard".into()));
+                return Err(super::no_artboard(i, d.artboards.len()));
             }
             // Its guides go with it.
             let gone = d.artboards.remove(i).id;
@@ -152,7 +157,7 @@ pub(crate) fn artboard_copy(s: &mut Session, p: &Value, cut: bool) -> Result<Val
 /// above its original) moved along → (the copy's index, the art's copies). When `sc.patterns`, the
 /// pattern tiles of the art's copies move with them. Duplicate Artboards and Alt-drag.
 pub(crate) fn copy_artboard(d: &mut vectorcraft_doc::Document, i: usize, dv: Vec2, art: &[NodeId], sc: Scaling) -> Result<(usize, Vec<NodeId>)> {
-    let src = d.artboards.get(i).cloned().ok_or_else(|| EngineError::Other("no such artboard".into()))?;
+    let src = d.artboards.get(i).cloned().ok_or_else(|| super::no_artboard(i, d.artboards.len()))?;
     let index = push_artboard_copy(d, &src, src.rect + dv);
     // Its guides come along.
     if let Some(id) = d.artboards.get(index).map(|a| a.id) {

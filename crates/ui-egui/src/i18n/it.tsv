@@ -4255,8 +4255,8 @@ lighting	Light	Luce
 @msg	The shape is too complex for a 3D effect	La forma è troppo complessa per un effetto 3D
 @msg	The 3D surface is too complex; simplify the shape	La superficie 3D è troppo complessa; semplificate la forma
 	Transform Objects	Trasforma oggetti
-@msg	unknown parameter `{key}`; did you mean `{near}`?	parametro sconosciuto `{key}`; forse intendevate `{near}`?
-@msg	unknown parameter `{key}`; the command takes no parameters	parametro sconosciuto `{key}`; il comando non ha parametri
-@msg	unknown parameter `{key}`; the command takes: {keys}	parametro sconosciuto `{key}`; il comando accetta: {keys}
+@msg	unknown parameter `{key}`; `{cmd}` takes no parameters	parametro sconosciuto `{key}`; `{cmd}` non ha parametri
+@msg	unknown parameter `{key}`; `{cmd}` takes {outline}	parametro sconosciuto `{key}`; `{cmd}` accetta {outline}
+@msg	`artboard` is an index, not {v}	`artboard` è un indice, non {v}
 	Load EPS into Clipboard	Carica EPS negli appunti
 @msg	an image of {w} × {h} pixels is too large to draw	un'immagine di {w} × {h} pixel è troppo grande per essere disegnata

@@ -504,7 +504,11 @@ fn text_create(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let made = add_node(s, "Type", NodeKind::Text(Box::new(t)), Appearance::default(), None)?;
     let id = made.get("id").and_then(Value::as_u64).map(NodeId);
-    Ok(super::typecmd::with_overflow(s, id.as_slice(), made))
+    let mut made = super::typecmd::with_overflow(s, id.as_slice(), made);
+    if let Some(warning) = str_param(p, "font").and_then(|f| super::fonts::missing_font_warning(f, str_param(p, "style").unwrap_or_default())) {
+        made["warning"] = json!(warning);
+    }
+    Ok(made)
 }
 
 /// The paragraph attributes new type gets (the Type tools, `text.create`): aligned to the start of

@@ -4176,9 +4176,9 @@ theme	Appearance	Giao diện
 @msg	unknown option `{path}.{k}`	tùy chọn không xác định `{path}.{k}`
 @msg	unknown overprints `{o}` (preserve, simulate or discard)	chế độ in đè không xác định `{o}` (preserve, simulate hoặc discard)
 @msg	unknown panel `{raw}`	bảng không xác định `{raw}`
-@msg	unknown parameter `{key}`; did you mean `{near}`?	tham số không xác định `{key}`; ý bạn là `{near}`?
-@msg	unknown parameter `{key}`; the command takes no parameters	tham số không xác định `{key}`; lệnh này không nhận tham số
-@msg	unknown parameter `{key}`; the command takes: {keys}	tham số không xác định `{key}`; lệnh nhận: {keys}
+@msg	unknown parameter `{key}`; `{cmd}` takes no parameters	tham số không xác định `{key}`; `{cmd}` không nhận tham số
+@msg	unknown parameter `{key}`; `{cmd}` takes {outline}	tham số không xác định `{key}`; `{cmd}` nhận {outline}
+@msg	`artboard` is an index, not {v}	`artboard` là một chỉ số, không phải {v}
 @msg	unknown preference `{key}`	tùy chọn không xác định `{key}`
 @msg	unknown preset (one of {_1})	thiết lập sẵn không xác định (một trong {_1})
 @msg	unknown preset `{name}` (high, medium, low or a saved one: see flattener.presets.list)	thiết lập sẵn không xác định `{name}` (high, medium, low hoặc thiết lập đã lưu: xem flattener.presets.list)

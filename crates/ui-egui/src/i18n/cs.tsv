@@ -4687,8 +4687,8 @@ mark-style	Japanese	Japonské
 @msg	The shape is too complex for a 3D effect	Tvar je pro 3D efekt příliš složitý
 @msg	The 3D surface is too complex; simplify the shape	3D povrch je příliš složitý; zjednodušte tvar
 	Transform Objects	Transformovat objekty
-@msg	unknown parameter `{key}`; did you mean `{near}`?	neznámý parametr `{key}`; mysleli jste `{near}`?
-@msg	unknown parameter `{key}`; the command takes no parameters	neznámý parametr `{key}`; příkaz nemá žádné parametry
-@msg	unknown parameter `{key}`; the command takes: {keys}	neznámý parametr `{key}`; příkaz přijímá: {keys}
+@msg	unknown parameter `{key}`; `{cmd}` takes no parameters	neznámý parametr `{key}`; `{cmd}` nemá žádné parametry
+@msg	unknown parameter `{key}`; `{cmd}` takes {outline}	neznámý parametr `{key}`; `{cmd}` přijímá {outline}
+@msg	`artboard` is an index, not {v}	`artboard` je index, ne {v}
 	Load EPS into Clipboard	Načíst EPS do schránky
 @msg	an image of {w} × {h} pixels is too large to draw	obraz o velikosti {w} × {h} obrazových bodů je příliš velký na vykreslení
