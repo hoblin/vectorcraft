@@ -1,8 +1,37 @@
 # Releasing VectorCraft
 
-> **Last updated:** 2026-10-12 · **Change:** minor (RPM runtime capabilities and metadata checks, #1275)
+> **Last updated:** 2026-10-13 · **Change:** major (the fork releases a Linux x86_64 tarball on tag; upstream's workflows removed)
 
-Every push to the `release` branch runs `.github/workflows/release.yml`. The workflow builds
+## This fork
+
+`hoblin/vectorcraft` is maintained for the Möttönen Creative Studio image, which runs
+`vectorcraft-cli` on Linux x86_64. Its release is `.github/workflows/release.yml`, which replaces
+every upstream workflow: pushing a tag `v<upstream version>-bondata.<n>` (for example
+`v0.10.0-bondata.2`; upstream's own tags, synced without the suffix, release nothing) builds `vectorcraft-<version>-linux-x86_64.tar.gz` on `ubuntu-22.04` with
+`packaging/linux/package.sh --formats tar` and craft-fonts at the pinned commit, then publishes it
+with `SHA256SUMS.txt` as the GitHub release `VectorCraft v<version>` of this repository. The
+archive has the same layout as upstream's Linux tarball (`bin/vectorcraft`, `bin/vectorcraft-cli`,
+`share/`), so a consumer downloads and unpacks it the way it did the official one:
+
+```sh
+v=0.10.0-bondata.2
+curl -fsSLO "https://github.com/hoblin/vectorcraft/releases/download/v$v/vectorcraft-$v-linux-x86_64.tar.gz"
+curl -fsSLO "https://github.com/hoblin/vectorcraft/releases/download/v$v/SHA256SUMS.txt"
+sha256sum -c --ignore-missing --strict SHA256SUMS.txt
+tar -xzf "vectorcraft-$v-linux-x86_64.tar.gz" --strip-components=2 -C /usr/local/bin "vectorcraft-$v-linux-x86_64/bin/vectorcraft-cli"
+```
+
+The job sets the workspace version from the tag (`cargo xtask version set`) before building, so
+`vectorcraft-cli --version` prints the tag's version. Nothing is signed, and nothing is built for
+macOS, Windows or other targets. Re-running the workflow on a released tag replaces its assets.
+Tags are never moved: a fix gets the next `-bondata.<n>`.
+
+The rest of this page describes upstream's pipeline. Its workflows no longer exist here; the
+packaging scripts under `packaging/` that they called still do.
+
+## Upstream
+
+Every push to the `release` branch runs upstream's `release.yml`. The workflow builds
 installers for macOS, Windows, Linux (including Flatpak bundles and a RISC-V tarball) and FreeBSD, plus the web build, and creates or updates a
 **draft** GitHub Release named `VectorCraft v<version>`. Nobody sees a draft until a maintainer
 publishes it.
@@ -224,4 +253,5 @@ warning, never a failed build.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | major | The fork releases a Linux x86_64 tarball on tag (VIB-11818); upstream's workflows removed, their description kept for the packaging scripts |
 | 2026-10-12 | minor | RPM dependencies use 64-bit runtime capabilities and enforce glibc 2.35 (#1275); real distro install/start-up checks remain pending |

@@ -138,8 +138,8 @@ CRAFT_FONTS_DIR="$PWD/../craft-fonts" cargo xtask ci   # also runs the Japanese-
   installed, and the web build fetches it before the app starts (`crates/text/web-fonts.txt`).
 - UI: `theme::install_fonts` adds them at the end of every egui family (BIZ UDPGothic first), after
   the UI fonts and before the installed fonts `ui_fonts.rs` discovers for other scripts.
-- Tests that need Japanese glyphs skip with a message when built without craft-fonts. The FreeBSD
-  CI job and every release job (`release.yml`) check craft-fonts out at a pinned commit; release
+- Tests that need Japanese glyphs skip with a message when built without craft-fonts. The release
+  job (`release.yml`) checks craft-fonts out at a pinned commit; release
   packages carry each embedded font's `OFL-<family>.txt`.
 
 ### Arabic fonts and the web build
