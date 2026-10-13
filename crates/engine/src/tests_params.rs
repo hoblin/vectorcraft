@@ -2,7 +2,7 @@
 
 use serde_json::json;
 
-use crate::cmd::params::{UNCHECKED, check_effect_params, check_keys, check_params, doc_keys, outline};
+use crate::cmd::params::{UNCHECKED, check_effect_params, check_keys, check_params, doc_keys, optional_key, outline, parts};
 use crate::{EngineError, Session, command_specs, find_command};
 
 fn keys(doc: &str) -> Vec<&str> {
@@ -49,9 +49,7 @@ fn refusal(id: &str, params: serde_json::Value) -> String {
     }
 }
 
-/// An unknown key is refused with the keys the command takes, `?` marking the optional ones. The
-/// error doesn't guess which key was meant: the agent knows what it wanted, and reads the key it
-/// needs off the outline.
+/// An unknown key is refused with the keys the command takes, `?` marking the optional ones.
 #[test]
 fn an_unknown_key_is_named_with_what_the_command_takes() {
     assert_eq!(
@@ -64,6 +62,15 @@ fn an_unknown_key_is_named_with_what_the_command_takes() {
         "unknown parameter `colour`; `shape.line` takes {x1, y1, x2, y2}"
     );
     assert_eq!(outline("{a?|b?: note, c: x|y, …settings as file.new} → {id}"), "{a?|b?, c, …settings as file.new}");
+    assert!(optional_key("{ids?|id?, color?}", "ids") && optional_key("{ids?|id?, color?}", "id"));
+    assert!(!optional_key("{id, depth?}", "id") && optional_key("{id, depth?}", "depth"));
+    assert_eq!(parts("{x, y} → {id}; a note → b"), ("{x, y}", Some("{id}; a note → b")));
+    assert_eq!(
+        parts("{reset?} as View → Print Tiling draws; reset → the placement again → {tileOrigin}"),
+        ("{reset?} as View → Print Tiling draws; reset → the placement again", Some("{tileOrigin}"))
+    );
+    assert_eq!(parts("{a} ←/→ cycles"), ("{a} ←/", Some("cycles")));
+    assert_eq!(parts("{a}"), ("{a}", None));
     for (id, ok) in [
         ("file.new", json!({"width": 300, "title": "a", "artboardLayout": {"anything": 1}})),
         ("file.new", json!({})),

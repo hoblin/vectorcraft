@@ -610,7 +610,8 @@ impl VectorcraftApp {
         })
     }
 
-    /// Run a UI or engine command by id. The single entry point for every frontend path.
+    /// Run a UI or engine command by id: the app's own calls. [`Self::dispatch`] is the one path
+    /// under this and [`Self::call`].
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
         self.dispatch(id, params, vectorcraft_engine::Session::execute)
     }

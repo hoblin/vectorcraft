@@ -438,6 +438,28 @@ mod tests {
         assert!(request("ui.render", json!({"artboard": 2}))["error"].is_string());
     }
 
+    /// `engine.execute` answers an agent in words ([`vectorcraft_engine::Session::call`]): what a
+    /// command changed, and what makes an unavailable one available.
+    #[test]
+    fn engine_execute_answers_in_words() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut app = VectorcraftApp::new(Session::new(), Services::default()).with_control(rx);
+        let mut request = |method: &str, params: Value| {
+            let (req, reply) = ControlRequest::new(method, params);
+            tx.send(req).unwrap();
+            app.drain_control(&egui::Context::default());
+            reply.try_recv().unwrap()
+        };
+        request("engine.execute", json!({"command": "file.new", "params": {}}));
+        request("engine.execute", json!({"command": "shape.rectangle", "params": {"x": 10, "y": 10, "width": 50, "height": 40}}));
+        let r = request("engine.execute", json!({"command": "paint.setFill", "params": {"color": "#ff0000"}}));
+        assert_eq!(r, json!({"ok": true, "result": "changed the fill of rectangle #2"}));
+        request("engine.execute", json!({"command": "select.none"}));
+        let r = request("engine.execute", json!({"command": "object.group"}));
+        assert_eq!(r["ok"], false);
+        assert!(r["error"].as_str().unwrap().ends_with("select.all every object."), "{r}");
+    }
+
     /// `ui.pointer` replies with the key object: a click on one of two selected objects makes it
     /// the key, and a click on the key again lets it go.
     #[test]

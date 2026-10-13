@@ -35,7 +35,7 @@ and its parameters.
 What the ids don't say:
 - Positions and sizes are in points, x to the right and y down from the document's origin, the
   top-left corner of the first artboard. Angles are degrees. A colour is \"#rrggbb\", [r, g, b] in
-  0..1, {c, m, y, k} or a swatch name.
+  0..1 or {c, m, y, k}; a swatch goes by name in `swatch` where a command takes it.
 - Every object has an id. document.inspect lists them with each object's kind, name and bounds.
   An id is looked up in the whole active document, whatever artboard or layer the object is on.
 - A command that draws (shape.*, text.create, file.place…) selects what it drew and answers its id.

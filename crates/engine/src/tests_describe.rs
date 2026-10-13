@@ -1,8 +1,10 @@
 //! [`Session::call`] answers in words: what a command changed, what an error needs next.
 
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 
-use crate::{EngineError, Session, command_specs};
+use crate::Session;
 
 fn drawn() -> Session {
     let mut s = Session::new();
@@ -67,6 +69,13 @@ fn a_missing_object_is_reported_with_where_to_look() {
         said(&mut s, "select.set", json!({"ids": [2]})),
         "invalid parameters for `select.set`: object #2 is in \"Untitled-1\", document index 0, not in the active document; document.activate {\"index\": 0} makes it active; `select.set` takes {ids}"
     );
+    // Every document numbers its objects from 1: the same id can be in several.
+    s.call("shape.rectangle", &json!({"x": 10, "y": 10, "width": 50, "height": 40})).unwrap();
+    s.call("file.new", &json!({})).unwrap();
+    assert_eq!(
+        said(&mut s, "select.set", json!({"ids": [2]})),
+        "invalid parameters for `select.set`: object #2 is not in the active document; there is one in each of \"Untitled-1\", document index 0 and \"Untitled-2\", document index 1; document.activate {\"index\": N} makes document index N active; `select.set` takes {ids}"
+    );
 }
 
 #[test]
@@ -104,17 +113,36 @@ fn an_error_says_what_the_command_takes_or_what_makes_it_available() {
     );
 }
 
-/// What makes a command available names `ids` only when the command takes them.
+/// A parameter error that already says what is taken (an effect's keys) isn't told again what the
+/// command takes.
 #[test]
-fn how_to_enable_names_only_keys_the_command_takes() {
+fn an_effect_parameter_error_names_the_effects_keys_once() {
     let mut s = drawn();
-    s.call("select.none", &json!({})).unwrap();
-    for c in command_specs() {
-        let Err(EngineError::Disabled(_, why)) = s.call(c.id, &json!({})) else { continue };
-        if why.contains("It acts on `ids`") {
-            assert!(crate::cmd::params::takes_key(c.params, "ids"), "{}: {why}", c.id);
-        }
-    }
+    assert_eq!(
+        said(&mut s, "effect.apply", json!({"effect": "blur.gaussian", "params": {"blurr": 3}})),
+        "invalid parameters for `effect.apply`: unknown parameter `blurr`; `blur.gaussian` takes {radius}"
+    );
+}
+
+/// Painting a group names the members and the property, not the group.
+#[test]
+fn a_paint_on_a_group_names_its_members() {
+    let mut s = drawn();
+    s.call("shape.ellipse", &json!({"x": 10, "y": 10, "width": 50, "height": 40})).unwrap();
+    s.call("select.all", &json!({})).unwrap();
+    s.call("object.group", &json!({})).unwrap();
+    assert_eq!(said(&mut s, "paint.setFill", json!({"color": "#ff0000"})), "changed the fill of rectangle #2 and ellipse #3");
+}
+
+/// A null answer on a document whose part the diff doesn't name still says the document changed.
+#[test]
+fn a_change_the_diff_cannot_name_is_still_a_change() {
+    let s = drawn();
+    let st = s.active().unwrap();
+    let mut doc = (*st.doc).clone();
+    doc.extra.insert("future".into(), json!(1));
+    let before = Some((st.uid, st.doc.clone(), st.selection.clone(), st.active_layer));
+    assert_eq!(crate::describe::changes(before, Some(&crate::DocState { doc: Arc::new(doc), ..st.clone() })), "changed the document");
 }
 
 #[test]

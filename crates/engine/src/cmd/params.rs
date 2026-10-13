@@ -143,9 +143,10 @@ pub fn doc_keys(doc: &str) -> std::result::Result<ParamKeys<'_>, String> {
 }
 
 /// `doc` split at the `→` outside brackets that starts what the command answers: the parameters
-/// and, when it says, the answer.
+/// and, when it says, the answer. An arrow in prose (`View → Show Print Tiling`) doesn't count
+/// while a later one leads to an object or a list.
 pub fn parts(doc: &str) -> (&str, Option<&str>) {
-    let (mut depth, mut quote) = (0usize, None);
+    let (mut depth, mut quote, mut arrows) = (0usize, None, vec![]);
     for (i, c) in doc.char_indices() {
         match (quote, c) {
             (Some(q), _) if c == q => quote = None,
@@ -153,11 +154,21 @@ pub fn parts(doc: &str) -> (&str, Option<&str>) {
             (None, '"' | '`') => quote = Some(c),
             (None, '{' | '[' | '(') => depth += 1,
             (None, '}' | ']' | ')') => depth = depth.saturating_sub(1),
-            (None, '→') if depth == 0 => return (doc.get(..i).unwrap_or_default().trim_end(), doc.get(i + c.len_utf8()..).map(str::trim)),
+            (None, '→') if depth == 0 => arrows.push(i),
             _ => {}
         }
     }
-    (doc, None)
+    let answer = |at: usize| doc.get(at + '→'.len_utf8()..).unwrap_or_default().trim();
+    let at = arrows.iter().copied().find(|at| answer(*at).starts_with(['{', '['])).or(arrows.first().copied());
+    match at {
+        Some(at) => (doc.get(..at).unwrap_or_default().trim_end(), Some(answer(at))),
+        None => (doc, None),
+    }
+}
+
+/// Does the description `doc` name `key` as an optional parameter (`key?`)?
+pub fn optional_key(doc: &str, key: &str) -> bool {
+    entries(doc).unwrap_or_default().iter().any(|e| matches!(e, Entry::Keys(keys) if keys.iter().any(|(name, optional)| *name == key && *optional)))
 }
 
 /// The params object of `doc` with only its keys, `?` marking the optional ones: `{x, y, width,
@@ -237,8 +248,7 @@ pub fn takes(id: &str, outline: &str) -> String {
     }
 }
 
-/// The parameter error of command `id` for `key`, with `takes`, what is taken instead. It doesn't
-/// guess which key was meant: the outline shows them, and the agent knows what it wanted.
+/// The parameter error of command `id` for `key`, with `takes`, what is taken instead.
 fn unknown(id: &str, key: &str, takes: String) -> crate::EngineError {
     bad(id, format!("unknown parameter `{key}`; {takes}"))
 }

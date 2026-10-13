@@ -27,6 +27,23 @@ fn text_of(result: &Value) -> String {
     result["content"].as_array().unwrap().iter().filter(|c| c["type"] == "text").map(|c| c["text"].as_str().unwrap().to_string()).collect()
 }
 
+/// A command that answers nothing itself answers what it changed, as plain text, not as a quoted
+/// JSON string; a batch carries the sentence in its step's `result`.
+#[test]
+fn a_worded_answer_is_plain_text() {
+    let mut s = server();
+    let r = call(&mut s, 1, "draw_shape", json!({"shape": "rectangle", "x": 10, "y": 10, "width": 60, "height": 40}));
+    assert_eq!(r["isError"], false, "{r}");
+    let r = call(&mut s, 2, "command_run", json!({"id": "paint.setFill", "params": {"color": "#ff0000"}}));
+    assert_eq!(text_of(&r), "changed the fill of rectangle #2");
+    let r = call(&mut s, 3, "command_batch", json!({"steps": [{"id": "select.none"}]}));
+    let batch: Value = serde_json::from_str(&text_of(&r)).unwrap();
+    assert_eq!(batch["results"][0]["result"], "no object is selected", "{batch}");
+    let r = call(&mut s, 4, "command_run", json!({"id": "object.group"}));
+    assert_eq!(r["isError"], true);
+    assert!(text_of(&r).ends_with("select.set {\"ids\": […]} selects objects, select.all every object."), "{r}");
+}
+
 fn tmp(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("vectorcraft-mcp-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

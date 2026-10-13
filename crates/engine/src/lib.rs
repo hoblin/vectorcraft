@@ -1347,7 +1347,7 @@ impl Session {
         match e {
             EngineError::BadParams { cmd, msg } if cmd == spec.id => {
                 let takes = cmd::params::takes(spec.id, &cmd::params::outline(spec.params));
-                let msg = if msg.ends_with(&takes) { msg } else { format!("{msg}; {takes}") };
+                let msg = if msg.contains("` takes ") { msg } else { format!("{msg}; {takes}") };
                 EngineError::BadParams { cmd, msg }
             }
             EngineError::Disabled(cmd, why) if cmd == spec.id => {

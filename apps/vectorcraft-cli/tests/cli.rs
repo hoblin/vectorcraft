@@ -59,6 +59,16 @@ fn describe_spells_a_command_out() {
     );
     assert!(stdout(&["describe", "file.open"]).starts_with("file.open — Open…\n\nParameters: {path}"));
     assert_eq!(stderr(&["describe", "nope.nothing"]), "vectorcraft-cli: unknown command `nope.nothing`. `vectorcraft-cli commands` lists them.");
+    assert_eq!(
+        stderr(&["describe", "shape.rectangle", "--foo"]),
+        "vectorcraft-cli: describe takes one command id; it was given 2: shape.rectangle, --foo"
+    );
+    assert!(stderr(&["describe"]).starts_with("vectorcraft-cli: describe takes one command id, e.g."));
+    // A required id is the command's target, not a stand-in for the selection.
+    let node = stdout(&["describe", "document.node"]);
+    assert!(!node.contains("Acts on"), "{node}");
+    let tiling = stdout(&["describe", "print.tiling.set"]);
+    assert!(tiling.contains("\nAnswers: {tileOrigin}\n"), "{tiling}");
 }
 
 #[test]
@@ -133,9 +143,21 @@ fn a_flag_mistake_is_read_back_and_nothing_runs() {
         stderr(&["run", "--cmd", r#"{"x":1}"#]),
         "vectorcraft-cli: --cmd 1 of 1 was read as command `{\"x\":1}`, which is not a command. --cmd takes a command id; its parameters go in --params after it. Nothing ran."
     );
+    let bad_json = stderr(&["run", "--cmd", "shape.rectangle", "--params", r#"{"x":10,"#]);
+    assert!(
+        bad_json
+            .starts_with("vectorcraft-cli: --cmd 1 of 1 (`shape.rectangle`) was given --params `{\"x\":10,`, which is not JSON: EOF while parsing")
+            && bad_json.ends_with(". `shape.rectangle` takes {x, y, width, height, radius?, rotation?}, as one JSON object. Nothing ran."),
+        "{bad_json}"
+    );
     assert_eq!(
-        stderr(&["run", "--cmd", "shape.rectangle", "--params", r#"{"x":10,"#]),
-        "vectorcraft-cli: --cmd 1 of 1 (`shape.rectangle`) was given --params `{\"x\":10,`, which is not JSON: EOF while parsing a value at line 1 column 8. `shape.rectangle` takes {x, y, width, height, radius?, rotation?}, as one JSON object. Nothing ran."
+        stderr(&["run", "--cmd", "shape.rectangle", "--params", r#"{"x":10,"y":10,"width":50,"height":40}"#, "--scale", "big"]),
+        "vectorcraft-cli: --scale was given `big`, which is not a number: it takes pixels per point, e.g. --scale 2. Nothing ran."
+    );
+    assert_eq!(stderr(&["run", "--in"]), "vectorcraft-cli: --in needs a file, the document to open. Nothing ran.");
+    assert_eq!(
+        stderr(&["run", "--cmd", "nope"]),
+        "vectorcraft-cli: --cmd 1 of 1 was read as command `nope`, which is not a command. `vectorcraft-cli commands` lists the commands. Nothing ran."
     );
     assert_eq!(
         stderr(&["run", "--cmd", "shape.rectangle", "--params", "[1]"]),
@@ -150,13 +172,13 @@ fn a_flag_mistake_is_read_back_and_nothing_runs() {
         stderr(&["run", "--foo"]),
         "vectorcraft-cli: run was given `--foo`, which it doesn't take. run takes --in FILE, --cmd COMMAND, --params JSON (right after its --cmd), --export OUT, --scale N and --print. Nothing ran."
     );
-    // A command name mistaken in the third step: nothing ran, the first two included.
     let svg = tmp("nothing-ran.svg");
     let _ = std::fs::remove_file(&svg);
     let err = stderr(&["run", "--cmd", "shape.rectangle", "--params", rect, "--export", svg.to_str().unwrap(), "--cmd", "nope"]);
-    assert!(
-        err.starts_with("vectorcraft-cli: --cmd 2 of 2 was read as command `nope`, which is not a command.") && err.ends_with(" Nothing ran."),
-        "{err}"
+    assert_eq!(
+        err,
+        "vectorcraft-cli: --cmd 2 of 2 was read as command `nope`, which is not a command. `vectorcraft-cli commands` lists the commands. Nothing ran.",
+        "the export before the mistaken step is left unwritten too"
     );
     assert!(!svg.exists(), "an export before the mistaken step still didn't run");
 }
@@ -200,7 +222,30 @@ fn a_failing_command_says_which_and_what_is_left_undone() {
         stderr(&["run", "--cmd", "artboard.delete", "--params", r#"{"index":5}"#]),
         "vectorcraft-cli: --cmd 1 of 1 (`artboard.delete`): no artboard 5 (0-based; the document has 1)."
     );
-    assert!(stderr(&["run", "--in", "nothere.svg", "--cmd", "select.all"]).ends_with("No such file or directory (os error 2). Nothing ran."));
+    let missing = stderr(&["run", "--in", "nothere.svg", "--cmd", "select.all"]);
+    assert!(
+        missing.starts_with("vectorcraft-cli: --in nothere.svg: ") && missing.contains("(os error 2)") && missing.ends_with(". Nothing ran."),
+        "{missing}"
+    );
+    assert_eq!(
+        stderr(&["run", "--cmd", "select.none", "--cmd", "object.group", "--cmd", "select.all"]),
+        "vectorcraft-cli: --cmd 2 of 3 (`object.group`): command `object.group` is not available right now: nothing selected. It acts on the selected objects; select.set {\"ids\": […]} selects objects, select.all every object. Nothing after it ran."
+    );
+    assert_eq!(
+        stderr(&["run", "--cmd", "paint.setFill", "--params", r##"{"ids":["$7.id"],"color":"#ff0000"}"##]),
+        "vectorcraft-cli: --cmd 1 of 1 (`paint.setFill`): `$7.id`: there is no step 7 before this one (steps count from 0; write $$ for a literal $)."
+    );
+}
+
+/// With --in, the OK line says what was opened.
+#[test]
+fn without_print_run_names_the_file_it_opened() {
+    let svg = tmp("opened.svg");
+    std::fs::write(&svg, r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"><rect width="20" height="10"/></svg>"#).unwrap();
+    assert_eq!(
+        stdout(&["run", "--in", svg.to_str().unwrap(), "--cmd", "select.all"]),
+        format!("OK: opened {}, 1 command ran; --print shows each command's answer\n", svg.display())
+    );
 }
 
 /// Every subcommand answers `--help` (and `help SUB`) with its page and does nothing else.

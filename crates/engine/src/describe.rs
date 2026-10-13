@@ -2,6 +2,7 @@
 //! what a command changed when it answers nothing itself, where a missing object is, and what the
 //! ids and indices don't say.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use vectorcraft_doc::{Document, Node, NodeId, NodeKind, Selection};
@@ -15,8 +16,11 @@ pub fn unknown_command(id: &str) -> String {
 }
 
 /// Command ids that contain `id`, or whose last segment starts with the first four characters of
-/// its last segment: at most eight, never one guessed answer.
+/// its last segment: at most eight.
 pub fn similar_commands(id: &str) -> Vec<&'static str> {
+    if id.is_empty() {
+        return vec![];
+    }
     let id = id.to_ascii_lowercase();
     let last = id.rsplit('.').next().unwrap_or_default();
     let head: String = last.chars().take(4).collect();
@@ -53,16 +57,22 @@ pub(crate) fn how_to_enable(spec: &cmd::CommandSpec, reason: &str) -> String {
     }
 }
 
-/// Where object `id`, which a command was given, is: not in this document, or in one of the other
-/// open documents.
+/// Where object `id`, which a command was given, is: not in this document, or in other open
+/// documents, each numbering its objects from 1, so the same id can be in several.
 pub(crate) fn no_object(docs: &[DocState], active: Option<usize>, id: NodeId) -> String {
-    let elsewhere = docs.iter().enumerate().filter(|(i, _)| Some(*i) != active).find(|(_, d)| d.doc.node(id).is_some());
-    match elsewhere {
-        Some((i, d)) => format!(
-            "object {id} is in {}, document index {i}, not in the active document; document.activate {{\"index\": {i}}} makes it active",
-            quoted(&d.title())
+    let elsewhere: Vec<(usize, String)> = docs
+        .iter()
+        .enumerate()
+        .filter(|(i, d)| Some(*i) != active && d.doc.node(id).is_some())
+        .map(|(i, d)| (i, format!("{}, document index {i}", quoted(&d.title()))))
+        .collect();
+    match elsewhere.as_slice() {
+        [] => format!("no object {id} in the document; document.inspect lists the objects with their ids"),
+        [(i, one)] => format!("object {id} is in {one}, not in the active document; document.activate {{\"index\": {i}}} makes it active"),
+        many => format!(
+            "object {id} is not in the active document; there is one in each of {}; document.activate {{\"index\": N}} makes document index N active",
+            many.iter().map(|(_, d)| d.as_str()).collect::<Vec<_>>().join(" and ")
         ),
-        None => format!("no object {id} in the document; document.inspect lists the objects with their ids"),
     }
 }
 
@@ -170,6 +180,9 @@ fn document(old: &Document, new: &Document) -> Vec<String> {
         said.push(format!("changed the document's {}", parts.join(", ")));
     }
     said.extend(artboards(old, new));
+    if said.is_empty() && old != new {
+        said.push("changed the document".into());
+    }
     said
 }
 
@@ -211,54 +224,60 @@ impl Diff {
         self.list(old, new, None, &old.layers, &new.layers);
     }
 
+    fn count(&self) -> usize {
+        self.added.len() + self.deleted.len() + self.moved.len() + self.changed.len() + self.reordered.len()
+    }
+
     /// The changes between the children `old` and `new` of container `parent` (`None`: the
-    /// document's layers).
+    /// document's layers): one pass over each list, so a layer of fifty thousand paths costs a
+    /// map lookup a child, not a scan.
     fn list(&mut self, old_doc: &Document, new_doc: &Document, parent: Option<NodeId>, old: &[Arc<Node>], new: &[Arc<Node>]) {
+        let was: HashMap<NodeId, &Arc<Node>> = old.iter().map(|o| (o.id, o)).collect();
+        let is: HashSet<NodeId> = new.iter().map(|n| n.id).collect();
         for n in new {
-            match old.iter().find(|o| o.id == n.id) {
+            match was.get(&n.id) {
                 None if old_doc.node(n.id).is_some() => {
                     if let Some(p) = parent {
                         self.moved.push((n.id, p));
                     }
                 }
                 None => self.added.push((n.id, parent.unwrap_or(n.id))),
-                Some(o) if Arc::ptr_eq(o, n) || o == n => {}
+                Some(o) if Arc::ptr_eq(o, n) => {}
                 Some(o) => self.node(old_doc, new_doc, o, n),
             }
         }
         for o in old {
-            if !new.iter().any(|n| n.id == o.id) && new_doc.node(o.id).is_none() {
+            if !is.contains(&o.id) && new_doc.node(o.id).is_none() {
                 self.deleted.push(o.id);
             }
         }
-        let kept = |a: &[Arc<Node>], b: &[Arc<Node>]| a.iter().map(|x| x.id).filter(|id| b.iter().any(|y| y.id == *id)).collect::<Vec<_>>();
-        if kept(old, new) != kept(new, old)
+        let kept_old: Vec<NodeId> = old.iter().map(|o| o.id).filter(|id| is.contains(id)).collect();
+        let kept_new: Vec<NodeId> = new.iter().map(|n| n.id).filter(|id| was.contains_key(id)).collect();
+        if kept_old != kept_new
             && let Some(p) = parent
         {
             self.reordered.push(p);
         }
     }
 
-    /// One node present in both trees and different: what of its own changed, or, for a container
-    /// whose own parts are the same, its children (all of them: the container; some: those).
+    /// One node whose `Arc` differs between the trees: what of its own changed, then, for a
+    /// container, what changed among its children. A container none of whose own parts or
+    /// children changed is still reported, as the one thing the edit touched.
     fn node(&mut self, old_doc: &Document, new_doc: &Document, old: &Node, new: &Node) {
         let own = own_changes(old, new);
-        let is_layer = matches!(new.kind, NodeKind::Layer { .. });
         match (old.children(), new.children()) {
             (Some(oc), Some(nc)) => {
-                let same = |o: &Arc<Node>, n: &Arc<Node>| o.id == n.id && (Arc::ptr_eq(o, n) || o == n);
-                let members_changed = nc.iter().filter(|n| !oc.iter().any(|o| same(o, n))).count();
-                let same_members = oc.len() == nc.len() && nc.iter().all(|n| oc.iter().any(|o| o.id == n.id));
-                if !is_layer && same_members && members_changed == nc.len() && !nc.is_empty() {
+                let before = self.count();
+                if !own.is_empty() {
                     self.changed.push((new.id, own));
-                } else {
-                    if !own.is_empty() || (!is_layer && members_changed == 0) {
-                        self.changed.push((new.id, own));
-                    }
-                    self.list(old_doc, new_doc, Some(new.id), oc, nc);
+                }
+                self.list(old_doc, new_doc, Some(new.id), oc, nc);
+                if self.count() == before && !matches!(new.kind, NodeKind::Layer { .. }) {
+                    self.changed.push((new.id, vec![]));
                 }
             }
-            _ => self.changed.push((new.id, own)),
+            _ if old != new => self.changed.push((new.id, own)),
+            _ => {}
         }
     }
 

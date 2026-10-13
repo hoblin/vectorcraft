@@ -189,8 +189,9 @@ fn read_object(b: &mut dyn Backend, id: &str) -> Result<Option<Value>, String> {
     let Ok(id) = id.parse::<u64>() else { return Ok(None) };
     match b.call("engine.execute", json!({"command": "document.node", "params": {"id": id, "summary": true}})) {
         Ok(v) => Ok(Some(v)),
-        // `EngineError::NoNode`, as both backends word it for an agent (`Session::call`).
-        Err(e) if e.starts_with("no object #") => Ok(None),
+        // `EngineError::NoNode`, as `Session::call` words it: not in the document, or in another
+        // open one.
+        Err(e) if e.starts_with("no object #") || e.starts_with("object #") => Ok(None),
         Err(e) => Err(e),
     }
 }

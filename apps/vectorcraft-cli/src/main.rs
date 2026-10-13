@@ -1,14 +1,5 @@
-//! `vectorcraft-cli`: VectorCraft from the command line.
-//!
-//! ```text
-//! vectorcraft-cli mcp [--connect 127.0.0.1:7979 | --headless] [--automation-read-root DIR] [--automation-write-root DIR]
-//! vectorcraft-cli run [--in FILE] [--cmd id [--params '{json}']]... [--export out.svg]... [--scale 2]
-//! vectorcraft-cli commands
-//! vectorcraft-cli convert IN OUT [--scale 2] [--artboard 0 | --range 1-3,5] [--outline-text] [--decimals N] [--replace-lossy] [--editing-data]
-//! vectorcraft-cli info FILE
-//! vectorcraft-cli bench FILE [--size 2880x1800] [--iters 5]
-//! vectorcraft-cli perf [--paths 50000] [--deep]
-//! ```
+//! `vectorcraft-cli`: VectorCraft from the command line. The subcommands and their flags are
+//! documented where the agent reads them: the help pages in [`help`].
 // Denied, not forbidden: the font listers shared with the desktop app allow it for their
 // DirectWrite (Windows) and CoreText (macOS) calls, and nothing else may.
 #![deny(unsafe_code)]
@@ -179,7 +170,7 @@ fn mcp(args: &[String]) -> Result<(), String> {
 fn commands(filter: Option<&str>) -> Result<(), String> {
     let mut h = Headless::new();
     let v = h.call("engine.commands", json!({}))?;
-    let filter = filter.map(str::to_ascii_lowercase);
+    let lowered = filter.map(str::to_ascii_lowercase);
     let mut lines: Vec<(String, String)> = v
         .as_array()
         .into_iter()
@@ -187,7 +178,7 @@ fn commands(filter: Option<&str>) -> Result<(), String> {
         .filter_map(|c| {
             let id = c["id"].as_str()?;
             let label = c["label"].as_str().unwrap_or_default();
-            let keep = filter.as_ref().is_none_or(|f| id.to_ascii_lowercase().contains(f) || label.to_ascii_lowercase().contains(f));
+            let keep = lowered.as_ref().is_none_or(|f| id.to_ascii_lowercase().contains(f) || label.to_ascii_lowercase().contains(f));
             keep.then(|| (id.to_string(), command_line(id, label, c["params"].as_str().unwrap_or_default())))
         })
         .collect();
@@ -204,7 +195,7 @@ fn commands(filter: Option<&str>) -> Result<(), String> {
     if lines.is_empty()
         && let Some(f) = filter
     {
-        return Err(format!("no command's id or name contains `{f}`; `vectorcraft-cli commands` lists them all"));
+        return Err(format!("no command's id or name contains `{}`; `vectorcraft-cli commands` lists them all", shown(f)));
     }
     Ok(())
 }
@@ -230,8 +221,15 @@ fn command_line(id: &str, label: &str, doc: &str) -> String {
 /// acts on, and the `run` call.
 fn describe(args: &[String]) -> Result<(), String> {
     use vectorcraft_engine::cmd::params::{outline, parts};
-    let Some(id) = args.first() else {
-        return Err("describe needs a command id, e.g. `vectorcraft-cli describe shape.rectangle`; `vectorcraft-cli commands` lists them".into());
+    let [id] = args else {
+        return Err(match args {
+            [] => "describe takes one command id, e.g. `vectorcraft-cli describe shape.rectangle`; `vectorcraft-cli commands` lists them".to_string(),
+            more => format!(
+                "describe takes one command id; it was given {}: {}",
+                more.len(),
+                more.iter().map(|a| shown(a)).collect::<Vec<_>>().join(", ")
+            ),
+        });
     };
     let (label, doc) = vectorcraft_mcp::command_doc(id)
         .ok_or_else(|| format!("{}. `vectorcraft-cli commands` lists them.", vectorcraft_engine::unknown_command(id)))?;
@@ -286,12 +284,13 @@ fn acts_on(id: &str, doc: &'static str) -> Option<String> {
     Some(format!("Acts on {on}{given}."))
 }
 
-/// What a command that takes `ids` (or `id`) without needing a selection acts on.
+/// What a command that takes `ids` (or `id`) as an option, without needing a selection, acts on.
+/// A command that requires the id acts on that alone, and says nothing here.
 fn acts_on_given(doc: &'static str) -> Option<&'static str> {
-    use vectorcraft_engine::cmd::params::takes_key;
-    if takes_key(doc, "ids") {
+    use vectorcraft_engine::cmd::params::optional_key;
+    if optional_key(doc, "ids") {
         Some("Acts on `ids`, else on the selected objects.")
-    } else if takes_key(doc, "id") {
+    } else if optional_key(doc, "id") {
         Some("Acts on `id`, else on the selected objects.")
     } else {
         None
@@ -344,7 +343,12 @@ fn convert(args: &[String]) -> Result<(), String> {
 }
 
 fn info(args: &[String]) -> Result<(), String> {
-    let file = args.first().ok_or("info takes FILE, the document to describe, e.g. info logo.ai")?;
+    let [file] = args else {
+        return Err(match args {
+            [] => "info takes FILE, the document to describe, e.g. info logo.ai".to_string(),
+            more => format!("info takes one FILE; it was given {}: {}", more.len(), more.iter().map(|a| shown(a)).collect::<Vec<_>>().join(", ")),
+        });
+    };
     let mut h = Headless::new();
     let opened = h.call("app.open", json!({"path": file})).map_err(|e| format!("open {file}: {e}"))?;
     let base = h.call("engine.execute", json!({"command": "file.info", "params": {}}))?;
