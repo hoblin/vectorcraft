@@ -16,9 +16,9 @@ in Preferences and `WGPU_POWER_PREF` do not control this OpenGL build.
 
 ## Build or download
 
-In your GitHub fork, open **Actions → Windows 7 x64 compatibility → Run workflow** (it
-also runs weekly and on pull requests changing the compatibility path).
-When it succeeds, download the `vectorcraft-windows7-x64-portable` artifact, extract the
+In upstream `storytold/vectorcraft` (this fork carries no Windows workflow), open
+**Actions → Windows 7 x64 compatibility → Run workflow** (it also runs weekly and on pull
+requests changing the compatibility path). When it succeeds, download the `vectorcraft-windows7-x64-portable` artifact, extract the
 contained portable ZIP, then run `vectorcraft.exe` on Windows 7. The CLI is included.
 No MSI is provided: the existing installer remains for modern Windows.
 
