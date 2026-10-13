@@ -4249,8 +4249,8 @@ lighting	Light	ライト
 @msg	The shape is too complex for a 3D effect	シェイプが複雑すぎるため 3D 効果を適用できません
 @msg	The 3D surface is too complex; simplify the shape	3D サーフェスが複雑すぎます。シェイプを単純化してください
 	Transform Objects	オブジェクトの変形
-@msg	unknown parameter `{key}`; did you mean `{near}`?	`{key}` は不明なパラメーターです。`{near}` のことですか?
-@msg	unknown parameter `{key}`; the command takes no parameters	`{key}` は不明なパラメーターです。このコマンドにパラメーターはありません
-@msg	unknown parameter `{key}`; the command takes: {keys}	`{key}` は不明なパラメーターです。このコマンドで使えるパラメーター: {keys}
+@msg	unknown parameter `{key}`; `{cmd}` takes no parameters	`{key}` は不明なパラメーターです。`{cmd}` にパラメーターはありません
+@msg	unknown parameter `{key}`; `{cmd}` takes {outline}	`{key}` は不明なパラメーターです。`{cmd}` で使えるパラメーター: {outline}
+@msg	`artboard` is an index, not {v}	`artboard` はインデックスです。{v} ではありません
 	Load EPS into Clipboard	EPS をクリップボードに読み込む
 @msg	an image of {w} × {h} pixels is too large to draw	{w} × {h} ピクセルの画像は大きすぎて描画できません

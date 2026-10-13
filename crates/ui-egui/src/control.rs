@@ -143,14 +143,10 @@ pub fn handle(app: &mut VectorcraftApp, ctx: &egui::Context, req: &ControlReques
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
             let params = p.get("params").cloned().unwrap_or(json!({}));
             let params = if params.is_null() { json!({}) } else { params };
-            // A key the command's description doesn't name is an error, not a default (#1442).
-            if let Err(e) = crate::menus::check_params(&app.session, id, &params) {
-                return err(e);
-            }
-            wrap(app.run(id, params))
+            wrap(app.call(id, params))
         }
         "engine.commands" => ok(all_commands(app)),
-        "document.inspect" => wrap(app.run("document.inspect", p.clone())),
+        "document.inspect" => wrap(app.call("document.inspect", p.clone())),
         "ui.inspect" => ok(inspect(app, ctx)),
         "ui.menu.list" => ok(serde_json::to_value(crate::menus::menu_entries(app)).unwrap_or_default()),
         "ui.contextMenu.list" => ok(serde_json::to_value(crate::menus::context_entries(app)).unwrap_or_default()),
@@ -332,7 +328,9 @@ pub fn handle(app: &mut VectorcraftApp, ctx: &egui::Context, req: &ControlReques
             let doc = st.doc.clone();
             // The artboard asked for (0-based, as headless), else the first.
             let index = p.get("artboard").and_then(Value::as_u64).map_or(Some(0), |i| usize::try_from(i).ok());
-            let Some(r) = index.and_then(|i| doc.artboards.get(i)).map(|a| a.rect) else { return err("no such artboard") };
+            let Some(r) = index.and_then(|i| doc.artboards.get(i)).map(|a| a.rect) else {
+                return err(format!("no artboard {} (0-based; the document has {})", p["artboard"], doc.artboards.len()));
+            };
             let scale = p.get("scale").and_then(Value::as_f64).unwrap_or(1.0);
             if let Err(e) = vectorcraft_render::raster_size(r, scale) {
                 return err(e);

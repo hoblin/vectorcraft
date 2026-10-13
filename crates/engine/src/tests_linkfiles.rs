@@ -140,7 +140,11 @@ fn a_search_looks_for_the_missing_files_or_the_objects_given() {
     // What isn't an image, an embedded image, and a document with nothing missing.
     let rect = s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap()["id"].as_u64().unwrap();
     let embedded = s.execute("file.place", &json!({"path": root.join("orig/here.png"), "link": false})).unwrap()["ids"][0].as_u64().unwrap();
-    for (ids, why) in [(json!([rect]), "is not an image"), (json!([embedded]), "show no linked files"), (json!([u64::MAX]), "no such object")] {
+    for (ids, why) in [
+        (json!([rect]), "is not an image"),
+        (json!([embedded]), "show no linked files"),
+        (json!([u64::MAX]), "no object #18446744073709551615 in the document"),
+    ] {
         let r = s.execute("links.findFiles", &json!({"folder": search, "ids": ids}));
         assert!(matches!(&r, Err(EngineError::BadParams { msg, .. }) if msg.contains(why)), "{ids}: {r:?}");
     }

@@ -131,6 +131,20 @@ pub(super) fn substitution_warning(d: &Document) -> Option<String> {
     })
 }
 
+/// What a command that was given font `family` says when no installed font has that family: the
+/// type is drawn in the fallback font, not the one named. `None` when the family is there (its
+/// closest style stands in for a missing one).
+pub(crate) fn missing_font_warning(family: &str, style: &str) -> Option<String> {
+    let db = vectorcraft_text::FontDb::global();
+    let missing = db.resolve(family, style).is_none_or(|(_, m)| m == vectorcraft_text::FontMatch::Missing);
+    missing.then(|| {
+        format!(
+            "font \"{family}\" isn't installed; the type is drawn in {} (text.fonts lists the fonts there are)",
+            vectorcraft_text::FALLBACK_FAMILY
+        )
+    })
+}
+
 fn text(d: &Document, id: NodeId) -> Option<&vectorcraft_doc::TextObject> {
     match d.node(id).map(|n| &n.kind) {
         Some(NodeKind::Text(t)) => Some(t),

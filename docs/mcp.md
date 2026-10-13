@@ -240,7 +240,7 @@ The older names below remain listed because existing workflows use them.
 | Tool | Arguments and result |
 |---|---|
 | `command_list` | Optional `filter`, `enabled_only`; returns the command array |
-| `command_run` | `id`, optional `params`; runs the command through the existing backend. An unknown key in `params` is an error that names it and the nearest key the command takes (`invalid parameters for `file.new`: unknown parameter `widht`; did you mean `width`?`), so a misspelt key no longer runs the command with its default (see [Parameter keys](#parameter-keys)) |
+| `command_run` | `id`, optional `params`; runs the command through the existing backend. A command that answers nothing itself answers what it changed, in words (see [Answers in words](#answers-in-words)). An unknown key in `params` is an error that names it and the keys the command takes (`invalid parameters for `shape.rectangle`: unknown parameter `widht`; `shape.rectangle` takes {x, y, width, height, radius?, rotation?}`), so a misspelt key no longer runs the command with its default (see [Parameter keys](#parameter-keys)) |
 | `command_batch` | `steps: [{id, params?}]`, optional `stop_on_error` (default true), `atomic` and `label`; returns `completed`, `failed`, `results: [{ok, result\|error}]`. Each edit has its own undo step, or with `atomic: true` the batch's edits are one undo step named `label` (else after its first edit; `edit.undoGroup.begin`/`end` underneath); failures set `isError`. A param string `"$N.path"` or `"$last.path"` takes a value from an earlier step's result (see `run` below) |
 | `doc_inspect` | Optional `depth`, `childLimit`; same summary as `inspect_document` |
 | `render_preview` | Optional `max_side` (1–4096, default 1024) and `artboard` (0-based, default 0); inline PNG of that artboard without editing it. Artboards too large to render within the allocation bound return a tool error |
@@ -649,30 +649,53 @@ printf '%s\n' \
 ## Headless batch CLI
 
 ```sh
-vectorcraft-cli commands                          # command catalogue (JSON)
+vectorcraft-cli commands [FILTER]                 # one line per command: id, name, parameters
+vectorcraft-cli describe shape.rectangle          # one command spelled out
 vectorcraft-cli run --in in.svg \
   --cmd select.all --cmd paint.setFill --params '{"color":"#ff0000"}' \
   --export out.svg --export out.png --scale 2
-vectorcraft-cli run --cmd file.new --params '{"width":800,"height":600}' \
+vectorcraft-cli run --print --cmd file.new --params '{"width":800,"height":600}' \
   --cmd shape.star --params '{"cx":400,"cy":300,"radius1":200,"radius2":90}' \
   --export star.vectorcraft
 ```
 
-`run` prints one JSON line per step (`open`, `cmd`, `export`) and exits non-zero on the first failure. `--params`
-applies to the `--cmd` just before it. `run` also accepts the host commands `file.open`, `file.save`, `file.export`,
-`file.exportForScreens` and `tool.select`. `run --in`, `convert` and `info` read every format `document.open` reads
-(`vectorcraft-cli --help` lists them).
+`vectorcraft-cli help run` (or `run --help`) is the CLI's own manual: the syntax, an example, and what the ids don't
+say (units, where ids are looked up, what a drawing command selects, index bases, step references). Without
+`--print`, `run` ends with one line, `OK: 2 commands ran, exported star.vectorcraft`; with it, each command's answer
+on its own line (`shape.star → {"id":2}`, `paint.setFill → changed the fill of star #2`). A failing step stops the
+run with its place and what is left undone: `--cmd 2 of 3 (`object.lock`): … Nothing after it ran: out.svg not
+written.` A mistake in the flags (a command id that isn't one, parameters that aren't JSON) is read back before
+anything runs and ends with `Nothing ran.` `--params` applies to the `--cmd` just before it. `run` also accepts the
+host commands `file.open`, `file.save`, `file.export`, `file.exportForScreens` and `tool.select`. `run --in`,
+`convert` and `info` read every format `document.open` reads (`vectorcraft-cli --help` lists them).
+
+### Answers in words
+
+`command_run`, `command_batch`, `run --cmd` and the control channel's `engine.execute` go through
+`Session::call`, the engine's entry point for callers outside the app. A command that answers nothing itself
+(the paint, transparency, selection and property commands, among others) answers what it changed instead of
+`null`, from a diff of the document and selection: `changed the fill of rectangle #2`, `added rectangle #5 to
+layer "Layer 1"`, `deleted group #4; moved rectangle #2 and ellipse #3 to layer "Layer 1"`, `no object is
+selected`, `nothing changed: no object is selected and no `ids` were given`. Errors say what the agent needs
+next: a parameter error ends with the keys the command takes (`` `shape.rectangle` takes {x, y, width, height,
+radius?, rotation?} ``), a command that isn't available with what makes it so (`nothing selected. It acts on
+`ids` or on the selected objects; select.set {"ids": […]} selects objects`), an object that doesn't exist with
+where to look (`no object #999 in the document; document.inspect lists the objects with their ids`, or the
+document it is in), an artboard index out of range with the range (`no artboard 5 (0-based; the document has
+1)`), and an unknown command with the commands named like it. `text.create` given a font that isn't installed
+answers with a `warning` naming the fallback font. The app's own calls (`Session::execute`) keep the plain
+messages, which its interface translates.
 
 ### Parameter keys
 
 `command_run`, each step of `command_batch`, `run --cmd … --params` and the control channel's `engine.execute` check
 the keys of `params` against the command's params description (the `params` text `command_list` returns): the object
 it starts with, `{x, width?: pt, name?|title?: …}`, names the keys; `?` marks an optional one. A key it doesn't name
-is refused before the command runs:
+is refused before the command runs, with the keys the command takes; the error doesn't guess which was meant:
 
 ```json
-{"id": "file.new", "params": {"widht": 300}}
-→ invalid parameters for `file.new`: unknown parameter `widht`; did you mean `width`?
+{"id": "shape.rectangle", "params": {"x": 10, "y": 10, "widht": 300, "height": 40}}
+→ invalid parameters for `shape.rectangle`: unknown parameter `widht`; `shape.rectangle` takes {x, y, width, height, radius?, rotation?}
 ```
 
 Only the top level is checked: the keys of an object inside a value (`artboardLayout: {…}`) are the command's to
@@ -683,7 +706,7 @@ is refused the same way:
 
 ```json
 {"id": "effect.apply", "params": {"effect": "blur.gaussian", "params": {"blurr": 3}}}
-→ invalid parameters for `effect.apply`: unknown parameter `blurr`; the command takes: radius
+→ invalid parameters for `effect.apply`: unknown parameter `blurr`; `blur.gaussian` takes {radius}
 ```
 
 A number outside the range the effect documents is still stored as given and clamped when the effect draws. A

@@ -4210,8 +4210,8 @@ theme	Appearance	Erscheinungsbild
 @msg	The shape is too complex for a 3D effect	Die Form ist für einen 3D-Effekt zu komplex
 @msg	The 3D surface is too complex; simplify the shape	Die 3D-Oberfläche ist zu komplex; vereinfachen Sie die Form
 	Transform Objects	Objekte transformieren
-@msg	unknown parameter `{key}`; did you mean `{near}`?	unbekannter Parameter `{key}`; meinten Sie `{near}`?
-@msg	unknown parameter `{key}`; the command takes no parameters	unbekannter Parameter `{key}`; der Befehl hat keine Parameter
-@msg	unknown parameter `{key}`; the command takes: {keys}	unbekannter Parameter `{key}`; der Befehl akzeptiert: {keys}
+@msg	unknown parameter `{key}`; `{cmd}` takes no parameters	unbekannter Parameter `{key}`; `{cmd}` hat keine Parameter
+@msg	unknown parameter `{key}`; `{cmd}` takes {outline}	unbekannter Parameter `{key}`; `{cmd}` akzeptiert {outline}
+@msg	`artboard` is an index, not {v}	`artboard` ist ein Index, nicht {v}
 	Load EPS into Clipboard	EPS in die Zwischenablage laden
 @msg	an image of {w} × {h} pixels is too large to draw	ein Bild mit {w} × {h} Pixeln ist zu groß, um gezeichnet zu werden

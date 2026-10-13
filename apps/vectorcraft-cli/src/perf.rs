@@ -291,7 +291,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         match a.as_str() {
             "--deep" => want_deep = true,
             "--paths" => n = it.next().and_then(|v| v.parse().ok()).ok_or("--paths needs a number")?,
-            other => return Err(format!("unknown perf option `{other}`")),
+            other => return Err(format!("perf was given `{other}`, which it doesn't take. perf takes --paths N and --deep")),
         }
     }
     let cores = std::thread::available_parallelism().map_or(1, |c| c.get());

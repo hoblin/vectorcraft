@@ -23,7 +23,7 @@ mod server;
 mod tools;
 
 pub use backend::{Backend, Remote};
-pub use headless::Headless;
+pub use headless::{Headless, command_doc};
 pub use prompts::{PROMPTS, PromptArg, PromptDef};
 pub use resources::{DOC_JSON_URI, DOC_URI, TEMPLATES};
 pub use server::{PROTOCOL_VERSION, Server};

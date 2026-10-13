@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cmd;
+mod describe;
 pub mod file_access;
 pub mod guard;
 pub mod inspect;
@@ -30,6 +31,7 @@ pub use cmd::distortcmds::perspective_click;
 pub use cmd::params::{check_keys, check_params};
 pub use cmd::rasterfx::{export_pdf, flatten_raster_effects};
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
+pub use describe::{similar_commands, unknown_command};
 pub use journal::Journal;
 pub use tooling::{UiRequest, ViewInfo};
 pub use vectorcraft_doc as doc;
@@ -1311,6 +1313,52 @@ impl Session {
         r
     }
 
+    /// [`Session::execute`] for a caller outside the app (the CLI, MCP, the control channel), which
+    /// reads the answer and nothing else: the params are held to the command's description
+    /// (#1442), a command that answers nothing says what it changed, and an error says what the
+    /// command takes, what makes it available or where the object it was given is.
+    pub fn call(&mut self, id: &str, params: &Value) -> Result<Value> {
+        let spec = find_command(id).ok_or_else(|| EngineError::Other(describe::unknown_command(id)))?;
+        self.check_params(id, params).map_err(|e| self.worded(spec, e))?;
+        let before = self.active().map(|d| (d.uid, d.doc.clone(), d.selection.clone(), d.active_layer));
+        let r = self.execute(id, params).map_err(|e| self.worded(spec, e))?;
+        if !r.is_null() {
+            return Ok(r);
+        }
+        let said = describe::changes(before, self.active());
+        // A command that acts on the selection, with nothing selected and no `ids`, acts on
+        // nothing: the agent that expected an edit learns why there was none.
+        let on_nothing = said == "nothing changed"
+            && cmd::params::takes_key(spec.params, "ids")
+            && params.get("ids").is_none()
+            && params.get("id").is_none()
+            && self.active().is_some_and(|d| d.selection.is_empty());
+        Ok(if on_nothing { "nothing changed: no object is selected and no `ids` were given".into() } else { said.into() })
+    }
+
+    /// Where object `id`, which a command was given, is, if anywhere: the message for one that
+    /// isn't in the active document.
+    pub(crate) fn no_object(&self, id: NodeId) -> String {
+        describe::no_object(&self.docs, self.active, id)
+    }
+
+    /// `e`, from `spec`, with what the agent that caused it needs next ([`Session::call`]).
+    fn worded(&self, spec: &CommandSpec, e: EngineError) -> EngineError {
+        match e {
+            EngineError::BadParams { cmd, msg } if cmd == spec.id => {
+                let takes = cmd::params::takes(spec.id, &cmd::params::outline(spec.params));
+                let msg = if msg.ends_with(&takes) { msg } else { format!("{msg}; {takes}") };
+                EngineError::BadParams { cmd, msg }
+            }
+            EngineError::Disabled(cmd, why) if cmd == spec.id => {
+                let hint = describe::how_to_enable(spec, &why);
+                EngineError::Disabled(cmd, format!("{why}.{hint}"))
+            }
+            EngineError::NoNode(id) => EngineError::Other(describe::no_object(&self.docs, self.active, id)),
+            e => e,
+        }
+    }
+
     /// Execute a command by id. This is THE entry point for every frontend.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
@@ -1740,6 +1788,8 @@ mod tests_css;
 mod tests_cut;
 #[cfg(test)]
 mod tests_dashalign;
+#[cfg(test)]
+mod tests_describe;
 #[cfg(test)]
 mod tests_distort;
 #[cfg(test)]

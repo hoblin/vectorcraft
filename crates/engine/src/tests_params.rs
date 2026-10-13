@@ -2,7 +2,7 @@
 
 use serde_json::json;
 
-use crate::cmd::params::{UNCHECKED, check_effect_params, check_keys, check_params, doc_keys};
+use crate::cmd::params::{UNCHECKED, check_effect_params, check_keys, check_params, doc_keys, outline};
 use crate::{EngineError, Session, command_specs, find_command};
 
 fn keys(doc: &str) -> Vec<&str> {
@@ -49,15 +49,21 @@ fn refusal(id: &str, params: serde_json::Value) -> String {
     }
 }
 
+/// An unknown key is refused with the keys the command takes, `?` marking the optional ones. The
+/// error doesn't guess which key was meant: the agent knows what it wanted, and reads the key it
+/// needs off the outline.
 #[test]
-fn an_unknown_key_is_named_with_the_nearest_accepted_one() {
-    assert_eq!(refusal("file.new", json!({"widht": 300})), "unknown parameter `widht`; did you mean `width`?");
-    assert_eq!(refusal("file.new", json!({"Width": 300})), "unknown parameter `Width`; did you mean `width`?");
-    assert_eq!(refusal("select.all", json!({"zzz": 1})), "unknown parameter `zzz`; the command takes no parameters");
+fn an_unknown_key_is_named_with_what_the_command_takes() {
+    assert_eq!(
+        refusal("shape.rectangle", json!({"x": 1, "y": 1, "widht": 300, "height": 2})),
+        "unknown parameter `widht`; `shape.rectangle` takes {x, y, width, height, radius?, rotation?}"
+    );
+    assert_eq!(refusal("select.all", json!({"zzz": 1})), "unknown parameter `zzz`; `select.all` takes no parameters");
     assert_eq!(
         refusal("shape.line", json!({"x1": 0, "y1": 0, "x2": 5, "y2": 5, "colour": "red"})),
-        "unknown parameter `colour`; the command takes: x1, y1, x2, y2"
+        "unknown parameter `colour`; `shape.line` takes {x1, y1, x2, y2}"
     );
+    assert_eq!(outline("{a?|b?: note, c: x|y, …settings as file.new} → {id}"), "{a?|b?, c, …settings as file.new}");
     for (id, ok) in [
         ("file.new", json!({"width": 300, "title": "a", "artboardLayout": {"anything": 1}})),
         ("file.new", json!({})),
@@ -88,11 +94,12 @@ fn a_batch_checks_its_steps() {
     assert!(check_params("command.batch", &step(json!({"width": 300}))).is_ok());
     match check_params("command.batch", &step(json!({"widht": 300}))) {
         Err(EngineError::BadParams { cmd, msg }) => {
-            assert_eq!((cmd.as_str(), msg.as_str()), ("file.new", "unknown parameter `widht`; did you mean `width`?"))
+            assert_eq!(cmd, "file.new");
+            assert!(msg.starts_with("unknown parameter `widht`; `file.new` takes {preset?, name?|title?, width?, height?,"), "{msg}");
         }
         other => panic!("{other:?}"),
     }
-    assert_eq!(refusal("command.batch", json!({"steps": []})), "unknown parameter `steps`; the command takes: label, commands, artboard");
+    assert_eq!(refusal("command.batch", json!({"steps": []})), "unknown parameter `steps`; `command.batch` takes {label?, commands, artboard?}");
 }
 
 /// #1592: the `params` of an effect are held to the effect's own keys and types, where the effect
@@ -105,10 +112,10 @@ fn effect_params_are_the_effects_own() {
         check_effect_params("effect.apply", e.id, &e.defaults).unwrap_or_else(|why| panic!("{}'s defaults: {why}", e.id));
     }
     let apply = |effect: &str, params| json!({"effect": effect, "params": params});
-    assert_eq!(refusal("effect.apply", apply("blur.gaussian", json!({"blurr": 3}))), "unknown parameter `blurr`; the command takes: radius");
-    assert_eq!(
-        refusal("appearance.addEffect", apply("stylize.dropShadow", json!({"opacty": 50}))),
-        "unknown parameter `opacty`; did you mean `opacity`?"
+    assert_eq!(refusal("effect.apply", apply("blur.gaussian", json!({"blurr": 3}))), "unknown parameter `blurr`; `blur.gaussian` takes {radius}");
+    assert!(
+        refusal("appearance.addEffect", apply("stylize.dropShadow", json!({"opacty": 50})))
+            .starts_with("unknown parameter `opacty`; `stylize.dropShadow` takes {")
     );
     assert_eq!(refusal("effect.apply", apply("blur.gaussian", json!({"radius": "big"}))), "`radius` must be a number");
     assert_eq!(refusal("effect.apply", apply("threeD.revolve", json!({"shade": 1}))), "`shade` must be true or false");

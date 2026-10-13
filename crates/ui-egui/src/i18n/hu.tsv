@@ -4653,8 +4653,8 @@ imageTrace	Outline	Körvonal
 @msg	The shape is too complex for a 3D effect	Az alakzat túl összetett a 3D effektushoz
 @msg	The 3D surface is too complex; simplify the shape	A 3D felület túl összetett; egyszerűsítse az alakzatot
 	Transform Objects	Objektumok transzformálása
-@msg	unknown parameter `{key}`; did you mean `{near}`?	ismeretlen paraméter: `{key}`; erre gondolt: `{near}`?
-@msg	unknown parameter `{key}`; the command takes no parameters	ismeretlen paraméter: `{key}`; a parancsnak nincs paramétere
-@msg	unknown parameter `{key}`; the command takes: {keys}	ismeretlen paraméter: `{key}`; a parancs ezeket fogadja el: {keys}
+@msg	unknown parameter `{key}`; `{cmd}` takes no parameters	ismeretlen paraméter: `{key}`; a(z) `{cmd}` parancsnak nincs paramétere
+@msg	unknown parameter `{key}`; `{cmd}` takes {outline}	ismeretlen paraméter: `{key}`; a(z) `{cmd}` ezeket fogadja el: {outline}
+@msg	`artboard` is an index, not {v}	az `artboard` egy index, nem {v}
 	Load EPS into Clipboard	EPS betöltése a vágólapra
 @msg	an image of {w} × {h} pixels is too large to draw	egy {w} × {h} pixeles kép túl nagy a kirajzoláshoz
