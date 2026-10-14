@@ -39,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set Text",
             [],
             None,
-            "{id?|ids?, text} replace the contents of text objects (keeps the first run's style) → {ids, overflow?: [id…] (area type and type on a path whose text no longer fits; left out when all fits)}",
+            "{id?|ids?, text (\\n or \\r starts a new line, as text.create)} replace the contents of text objects (keeps the first run's style) → {ids, overflow?: [id…] (area type and type on a path whose text no longer fits; left out when all fits)}",
             has_doc,
             set_text
         ),
@@ -376,7 +376,7 @@ pub(crate) fn style_chars(t: &mut TextObject, range: Option<TextRange>, mut f: i
 }
 
 fn set_text(s: &mut Session, p: &Value) -> Result<Value> {
-    let text = str_param(p, "text").ok_or_else(|| bad("text.setText", "missing `text`"))?.to_string();
+    let text = text_param(p, "text").ok_or_else(|| bad("text.setText", "missing `text`"))?;
     let ids = text_targets(s, p, "text.setText")?;
     s.edit("Typing", |d, _| {
         for id in &ids {

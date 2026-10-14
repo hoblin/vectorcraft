@@ -340,7 +340,7 @@ fn import_text(s: &mut Session, p: &Value) -> Result<Value> {
     if raw.len() > MAX_TEXT {
         return Err(bad(C, format!("the text is over {} MB", MAX_TEXT >> 20)));
     }
-    let text = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let text = paragraph_breaks(raw);
     let text = text.trim_end_matches('\n');
     if text.trim().is_empty() {
         return Err(bad(C, "the text is empty"));
