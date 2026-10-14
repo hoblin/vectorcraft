@@ -74,7 +74,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Create Text",
             [],
             None,
-            "{x, y, text, vertical?: bool = false, size?: pt, font?: family, style?, color?, area?: {width, height, fit?: none|autoHeight|shrinkText, fitMinPercent?}, placeholder?: bool (fill it with placeholder text instead, as the Type tools do with prefs placeholderText), leadingModel?: \"romanBaseline\"|\"emBoxTop\", charAlign?: \"romanBaseline\"|\"emBoxTop\"|\"emBoxCenter\"|\"emBoxBottom\"|\"icfTop\"|\"icfBottom\" (default: emBoxTop and emBoxCenter while the interface is in Japanese, else romanBaseline)} → {id, overflow?: [id] (area type whose text doesn't fit its frame: the lines past it aren't drawn; left out when it fits)}; new area type gets Auto Size (fit autoHeight) when the autoSizeAreaType preference is on",
+            "{x, y, text (\\n or \\r starts a new line: a new paragraph, as Return does), vertical?: bool = false, size?: pt, font?: family, style?, color?, area?: {width, height, fit?: none|autoHeight|shrinkText, fitMinPercent?}, placeholder?: bool (fill it with placeholder text instead, as the Type tools do with prefs placeholderText), leadingModel?: \"romanBaseline\"|\"emBoxTop\", charAlign?: \"romanBaseline\"|\"emBoxTop\"|\"emBoxCenter\"|\"emBoxBottom\"|\"icfTop\"|\"icfBottom\" (default: emBoxTop and emBoxCenter while the interface is in Japanese, else romanBaseline)} → {id, overflow?: [id] (area type whose text doesn't fit its frame: the lines past it aren't drawn; left out when it fits)}; new area type gets Auto Size (fit autoHeight) when the autoSizeAreaType preference is on",
             has_doc,
             text_create
         ),
@@ -485,8 +485,8 @@ fn path_create(s: &mut Session, p: &Value) -> Result<Value> {
 fn text_create(s: &mut Session, p: &Value) -> Result<Value> {
     let x = f64_req(p, "x", "text.create")?;
     let y = f64_req(p, "y", "text.create")?;
-    let text = str_param(p, "text").unwrap_or("");
-    let mut t = TextObject::point(Point::new(x, y), text, new_type_style(s, p));
+    let text = text_param(p, "text").unwrap_or_default();
+    let mut t = TextObject::point(Point::new(x, y), &text, new_type_style(s, p));
     t.vertical = p.get("vertical").and_then(Value::as_bool).unwrap_or(false);
     t.para = new_type_para();
     new_type_alignment(s, p, "text.create", &mut t)?;

@@ -130,7 +130,7 @@ fn mac_roman(b: u8) -> char {
 /// each line is a paragraph and blank lines go. Other control characters than tabs are dropped,
 /// and so are blank lines at the end.
 fn clean(text: &str, o: TextOptions) -> String {
-    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    let text = paragraph_breaks(text);
     let text: String = text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect();
     let blank = |l: &str| l.trim().is_empty();
     let mut paras: Vec<String> = vec![];

@@ -42,6 +42,8 @@ What the ids don't say:
   paint.*, stroke.*, object.*, effect.* and text.set* act on the selected objects, or on the
   objects named in `ids` where the command takes them (describe says); select.set {\"ids\": […]}
   selects others, select.all everything, select.none nothing.
+- In text (text.create, text.setText, text.editRange, text.createInPath), \\n or \\r starts a new
+  line: a new paragraph, as Return does in the Type tool. Point text has no width to wrap at.
 - Artboard indices start at 0 (artboard.*, document.export {\"artboard\": N}); convert's --range
   counts from 1.
 - A later step can use an earlier one's answer: \"$N.id\" is the id step N answered (steps count

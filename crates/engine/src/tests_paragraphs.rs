@@ -94,6 +94,26 @@ fn editing_splits_and_merges_paragraph_styles() {
 }
 
 #[test]
+fn a_return_in_given_text_breaks_the_line_as_a_newline_does() {
+    let mut s = session();
+    let lines = |s: &Session, id: u64| vectorcraft_text::layout(vectorcraft_text::FontDb::global(), &text(s, id)).lines.len();
+    let point = s.execute("text.create", &json!({"x": 10, "y": 40, "text": "Tools and\requipment"})).unwrap()["id"].as_u64().unwrap();
+    assert_eq!(text(&s, point).plain_text(), "Tools and\nequipment");
+    assert_eq!(lines(&s, point), 2);
+    s.execute("text.setText", &json!({"ids": [point], "text": "a\r\nb\rc"})).unwrap();
+    assert_eq!(text(&s, point).plain_text(), "a\nb\nc");
+    assert_eq!(text(&s, point).paragraph_count(), 3);
+    let caret = s.execute("text.editRange", &json!({"id": point, "start": 1, "end": 1, "insert": "\r\n"})).unwrap()["caret"].as_u64().unwrap();
+    assert_eq!((text(&s, point).plain_text().as_str(), caret), ("a\n\nb\nc", 2));
+    let runs = json!([{"text": "x\ry", "style": text(&s, point).runs[0].style}]);
+    s.execute("text.editRange", &json!({"id": point, "start": 0, "end": 0, "runs": runs})).unwrap();
+    assert!(text(&s, point).plain_text().starts_with("x\ny"));
+    let frame = s.execute("shape.rectangle", &json!({"x": 0, "y": 200, "width": 200, "height": 100})).unwrap()["id"].as_u64().unwrap();
+    let area = s.execute("text.createInPath", &json!({"path": frame, "mode": "area", "text": "one\rtwo"})).unwrap()["id"].as_u64().unwrap();
+    assert_eq!(text(&s, area).plain_text(), "one\ntwo");
+}
+
+#[test]
 fn return_in_the_type_tool_continues_the_paragraph_it_splits() {
     let mut s = session();
     let v = ViewInfo::default();

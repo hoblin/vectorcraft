@@ -18,7 +18,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit Text",
             [],
             None,
-            "{id, start: byte, end: byte, insert?: string, runs?: [{text, style}]} replace bytes start..end of the plain text (inserted text takes the replaced text's style unless styled `runs` are given) → {id, caret}",
+            "{id, start: byte, end: byte, insert?: string (\\n or \\r starts a new line, as text.create; so does one in a run's text), runs?: [{text, style}]} replace bytes start..end of the plain text (inserted text takes the replaced text's style unless styled `runs` are given) → {id, caret}",
             has_doc,
             edit_range
         ),
@@ -45,7 +45,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Area / Path Type",
             [],
             None,
-            "{path: id, mode: \"area\"|\"onPath\", text?: \"\", vertical?: bool = false, at?: [x, y] (on-path start: nearest point), size?, font?, style?, color? (as text.create), fit?: none|autoHeight|shrinkText, fitMinPercent? (area: as text.areaOptions; default autoHeight when the autoSizeAreaType preference is on), placeholder?: bool (placeholder text instead, as text.create), leadingModel?, charAlign? (as text.create)} turn a path into an area-type frame or a type-on-a-path baseline (the path's paint is dropped) → {id, overflow?: [id] (the text doesn't fit; left out when it fits)}",
+            "{path: id, mode: \"area\"|\"onPath\", text?: \"\" (\\n or \\r starts a new line, as text.create), vertical?: bool = false, at?: [x, y] (on-path start: nearest point), size?, font?, style?, color? (as text.create), fit?: none|autoHeight|shrinkText, fitMinPercent? (area: as text.areaOptions; default autoHeight when the autoSizeAreaType preference is on), placeholder?: bool (placeholder text instead, as text.create), leadingModel?, charAlign? (as text.create)} turn a path into an area-type frame or a type-on-a-path baseline (the path's paint is dropped) → {id, overflow?: [id] (the text doesn't fit; left out when it fits)}",
             has_doc,
             create_in_path
         ),
@@ -122,9 +122,10 @@ pub(crate) fn set_plain_text(d: &mut vectorcraft_doc::Document, id: NodeId, text
         Some(_) => return Err(EngineError::Other(format!("node {} is not text", id.0))),
         None => return Err(EngineError::NoNode(id)),
     };
+    let text = paragraph_breaks(text);
     let t = text_mut(d, id).ok_or(EngineError::NoNode(id))?;
-    t.splice_paras(0, len, text);
-    edit::replace_range(&mut t.runs, 0, len, text);
+    t.splice_paras(0, len, &text);
+    edit::replace_range(&mut t.runs, 0, len, &text);
     refresh_bounds(t);
     Ok(())
 }
@@ -147,9 +148,13 @@ fn edit_range(s: &mut Session, p: &Value) -> Result<Value> {
     let (a, b) = range_of(p, len);
     let styled: Option<Vec<TextRun>> = match p.get("runs") {
         None | Some(Value::Null) => None,
-        Some(v) => Some(serde_json::from_value(v.clone()).map_err(|e| bad(C, format!("bad `runs`: {e}")))?),
+        Some(v) => {
+            let mut runs: Vec<TextRun> = serde_json::from_value(v.clone()).map_err(|e| bad(C, format!("bad `runs`: {e}")))?;
+            runs.iter_mut().for_each(|r| r.text = paragraph_breaks(&r.text));
+            Some(runs)
+        }
     };
-    let insert = str_param(p, "insert").unwrap_or("").to_string();
+    let insert = text_param(p, "insert").unwrap_or_default();
     let caret = s.edit("Typing", |d, _| {
         let t = text_mut(d, id).ok_or(EngineError::NoNode(id))?;
         // Paragraph styles follow the edit: a split paragraph's new one continues its style, a
@@ -526,7 +531,7 @@ fn create_in_path(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(C, "area type needs a path that encloses an area"));
     }
     let style = super::create::new_type_style(s, p);
-    let text = str_param(p, "text").unwrap_or("").to_string();
+    let text = text_param(p, "text").unwrap_or_default();
     let start = match point_param(p, "at") {
         Some(at) if on_path => vectorcraft_geom::ArcPath::new(path).fraction_at(at).unwrap_or(0.0),
         _ => 0.0,

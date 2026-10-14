@@ -45,7 +45,7 @@ pub(super) fn encode(doc: &Document, p: &Value) -> Result<Vec<u8>> {
     let mut text = String::new();
     for story in stories(doc) {
         // Any line break in the story becomes the chosen one; every story ends with one.
-        let story = story.replace("\r\n", "\n").replace('\r', "\n");
+        let story = paragraph_breaks(&story);
         for line in story.split('\n') {
             text.push_str(line);
             text.push_str(eol);

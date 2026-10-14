@@ -306,6 +306,12 @@ pub(crate) fn bool_or(p: &Value, key: &str, default: bool) -> bool {
 pub(crate) fn str_param<'a>(p: &'a Value, key: &str) -> Option<&'a str> {
     p.get(key).and_then(Value::as_str)
 }
+pub(crate) fn text_param(p: &Value, key: &str) -> Option<String> {
+    str_param(p, key).map(paragraph_breaks)
+}
+pub(crate) fn paragraph_breaks(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
 pub(crate) fn id_param(p: &Value, key: &str) -> Option<NodeId> {
     p.get(key).and_then(Value::as_u64).map(NodeId)
 }
